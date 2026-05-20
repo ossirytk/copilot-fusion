@@ -34,7 +34,9 @@ def test_core_memory_roundtrip() -> None:
 
         recalled = _call("recall", {"query": "fusion-memory-test-entry", "scope": "project", "scope_path": tmp})
         assert isinstance(recalled, list)
-        assert any("fusion-memory-test-entry" in str(item.get("content", "")) for item in recalled if isinstance(item, dict))
+        assert any(
+            "fusion-memory-test-entry" in str(item.get("content", "")) for item in recalled if isinstance(item, dict)
+        )
 
 
 def test_tools_fs_glob_and_json_select() -> None:
