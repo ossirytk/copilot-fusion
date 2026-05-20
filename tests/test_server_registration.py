@@ -66,4 +66,4 @@ def test_api_compat_matrix_reports_known_gaps() -> None:
     domains = matrix["domains"]
     assert domains["contextwell"]["missing"] == []
     assert domains["gitpilot"]["missing"] == []
-    assert domains["toolpilot"]["missing"] == ["file_hash", "read_file"]
+    assert domains["toolpilot"]["missing"] == []

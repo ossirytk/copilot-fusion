@@ -61,6 +61,14 @@ def test_tools_fs_glob_and_json_select() -> None:
         assert isinstance(rows, list)
         assert rows and rows[0]["name"] == "alpha"
 
+        read_back = _call("read_file", {"path": str(root / "a.txt")})
+        assert isinstance(read_back, dict)
+        assert "alpha" in str(read_back.get("content", ""))
+
+        file_digest = _call("file_hash", {"path": str(root / "a.txt"), "algorithm": "sha256"})
+        assert isinstance(file_digest, dict)
+        assert len(str(file_digest.get("hash", ""))) == 64
+
 
 def test_git_status_on_initialized_repo() -> None:
     with tempfile.TemporaryDirectory() as tmp:

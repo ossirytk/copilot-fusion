@@ -38,7 +38,7 @@ Initial migration is active:
 
 - `contextwell-core` exports memory tools (`remember`, `recall`, `list_memories`, etc.)
 - `contextwell-git` exports git and gh tools (`git_*`, `gh_*`)
-- `contextwell-tools` exports filesystem/code tools (`fs_glob`, `fs_tree`, `text_search`, `json_select`, `yaml_select`, `server_stats`)
+- `contextwell-tools` exports filesystem/code tools (`fs_glob`, `fs_tree`, `text_search`, `read_file`, `json_select`, `yaml_select`, `file_hash`, `server_stats`)
 
 ## Configuration
 
@@ -69,7 +69,7 @@ Base MCP config example is provided in `mcp-config.example.json`.
 |---|---|---|
 | `contextwell` | Full initial surface | Implemented in `contextwell-core` domain |
 | `gitpilot` | Full initial surface | Implemented in `contextwell-git` domain |
-| `toolpilot` | Partial initial surface | Known gaps: `read_file`, `file_hash` |
+| `toolpilot` | Full initial surface | Implemented in `contextwell-tools` domain (with `git_log` routed via merged git domain) |
 
 ## Optional Tools Strategy
 
@@ -110,8 +110,8 @@ hyperfine --warmup 2 "uv run python scripts/benchmark_fusion.py"
 
 | Metric | Mean |
 |---|---:|
-| `create_server_ms` | 50.698 |
-| `list_tools_ms` | 0.598 |
-| `fusion_health_ms` | 0.590 |
-| `fusion_api_compat_ms` | 0.440 |
-| `tool_count` | 42 |
+| `create_server_ms` | 55.781 |
+| `list_tools_ms` | 0.649 |
+| `fusion_health_ms` | 0.536 |
+| `fusion_api_compat_ms` | 0.424 |
+| `tool_count` | 44 |

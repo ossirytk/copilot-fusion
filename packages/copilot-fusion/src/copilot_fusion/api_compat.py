@@ -56,11 +56,6 @@ TOOLPILOT_TOOLS = {
     "server_stats",
 }
 
-# Merged server intentionally does not expose dedicated read_file/file_hash yet.
-KNOWN_GAPS = {
-    "toolpilot": {"read_file", "file_hash"},
-}
-
 
 @dataclass(frozen=True, slots=True)
 class DomainMatrix:
@@ -82,7 +77,6 @@ def active_tool_names(config: FusionConfig) -> set[str]:
     if config.enable_tools:
         names.update(TOOLPILOT_TOOLS)
         names.add("fusion_tools_health")
-        names.difference_update(KNOWN_GAPS["toolpilot"])
         # git_log is provided by the git domain to avoid duplicate registration.
         if not config.enable_git:
             names.discard("git_log")
@@ -111,5 +105,5 @@ def build_matrix(tool_names: set[str]) -> dict[str, object]:
             }
             for domain, value in matrix.items()
         },
-        "known_gaps": {domain: sorted(gaps) for domain, gaps in KNOWN_GAPS.items()},
+        "known_gaps": {"toolpilot": []},
     }

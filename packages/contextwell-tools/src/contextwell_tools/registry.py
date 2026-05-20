@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+import hashlib
 import json
 import re
 from collections import Counter
@@ -124,6 +125,38 @@ def register(mcp: FastMCP) -> None:
         return {"results": results, "truncated": False}
 
     @mcp.tool
+    def read_file(
+        path: str,
+        start_line: int = 1,
+        end_line: int = -1,
+        max_bytes: int = 200_000,
+    ) -> dict[str, object]:
+        _REQUESTS["read_file"] += 1
+        resolved = resolve_path(path)
+        data = resolved.read_bytes()
+        if max_bytes > 0 and len(data) > max_bytes:
+            data = data[:max_bytes]
+            truncated = True
+        else:
+            truncated = False
+        text = data.decode("utf-8", errors="replace")
+        lines = text.splitlines()
+        s = max(1, start_line)
+        e = len(lines) if end_line <= 0 else min(end_line, len(lines))
+        if s > len(lines):
+            selected: list[str] = []
+        else:
+            selected = lines[s - 1 : e]
+        return {
+            "path": str(resolved),
+            "content": "\n".join(selected),
+            "start_line": s,
+            "end_line": e,
+            "truncated": truncated,
+            "bytes_read": len(data),
+        }
+
+    @mcp.tool
     def json_select(
         path: str,
         fields: list[str],
@@ -168,6 +201,22 @@ def register(mcp: FastMCP) -> None:
                 return {"error": "pyyaml not installed"}
             data = yaml.safe_load(resolved.read_text(encoding="utf-8"))
         return {"results": {field: _project(data, field) for field in fields}}
+
+    @mcp.tool
+    def file_hash(path: str, algorithm: str = "sha256") -> dict[str, object]:
+        _REQUESTS["file_hash"] += 1
+        resolved = resolve_path(path)
+        normalized = algorithm.lower()
+        if normalized not in {"sha256", "sha1", "md5"}:
+            return {"error": f"Unsupported algorithm: {algorithm}"}
+        hasher = hashlib.new(normalized)
+        with resolved.open("rb") as handle:
+            while True:
+                chunk = handle.read(65_536)
+                if not chunk:
+                    break
+                hasher.update(chunk)
+        return {"path": str(resolved), "algorithm": normalized, "hash": hasher.hexdigest()}
 
     @mcp.tool
     def server_stats() -> dict[str, object]:
