@@ -1,0 +1,28 @@
+{
+  "servers": {
+    "copilot-fusion": {
+      "command": "copilot-fusion"
+    },
+    "feedpilot": {
+      "command": "feedpilot"
+    },
+    "benchpilot": {
+      "command": "benchpilot"
+    },
+    "envpilot": {
+      "command": "envpilot"
+    },
+    "httppilot": {
+      "command": "httppilot"
+    },
+    "shellpilot": {
+      "command": "shellpilot"
+    },
+    "snippetpilot": {
+      "command": "snippetpilot"
+    },
+    "diffpilot": {
+      "command": "diffpilot"
+    }
+  }
+}

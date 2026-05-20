@@ -53,3 +53,65 @@ Example:
 ```bash
 FUSION_ENABLE_CORE=0 FUSION_ENABLE_GIT=1 FUSION_ENABLE_TOOLS=1 copilot-fusion
 ```
+
+Base MCP config example is provided in `mcp-config.example.json`.
+
+## Migration Guide (contextwell + gitpilot + toolpilot → copilot-fusion)
+
+1. Install and configure `copilot-fusion` as your primary server.
+2. Disable `contextwell`, `gitpilot`, and `toolpilot` in your MCP client config.
+3. Keep the same tool names in prompts; the merged server preserves the original surface for the migrated domains.
+4. Validate coverage with `fusion_api_compat` after startup.
+
+### Tool-surface status
+
+| Source server | Coverage in fusion | Notes |
+|---|---|---|
+| `contextwell` | Full initial surface | Implemented in `contextwell-core` domain |
+| `gitpilot` | Full initial surface | Implemented in `contextwell-git` domain |
+| `toolpilot` | Partial initial surface | Known gaps: `read_file`, `file_hash` |
+
+## Optional Tools Strategy
+
+The non-core pilot tools remain standalone and can run beside fusion:
+
+- `feedpilot`
+- `benchpilot`
+- `envpilot`
+- `httppilot`
+- `shellpilot`
+- `snippetpilot`
+- `diffpilot`
+
+Use `mcp-config.optional.example.json` as a template when you want fusion + optional tools together.
+
+## Performance Benchmarking
+
+Run the local benchmark harness:
+
+```bash
+uv run python scripts/benchmark_fusion.py
+```
+
+This reports average latency for:
+
+- `create_server`
+- `list_tools`
+- `fusion_health`
+- `fusion_api_compat`
+
+For command-level benchmarking (startup process), use `hyperfine`:
+
+```bash
+hyperfine --warmup 2 "uv run python scripts/benchmark_fusion.py"
+```
+
+### Latest local baseline
+
+| Metric | Mean |
+|---|---:|
+| `create_server_ms` | 50.698 |
+| `list_tools_ms` | 0.598 |
+| `fusion_health_ms` | 0.590 |
+| `fusion_api_compat_ms` | 0.440 |
+| `tool_count` | 42 |
