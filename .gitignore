@@ -1,0 +1,37 @@
+# Python
+__pycache__/
+*.py[codz]
+*$py.class
+.venv
+venv/
+env/
+ENV/
+.python-version
+.pytest_cache/
+.coverage
+.coverage.*
+coverage.xml
+htmlcov/
+.mypy_cache/
+.ruff_cache/
+
+# Build artifacts
+build/
+dist/
+*.egg-info/
+.eggs/
+
+# Rust
+target/
+
+# Local tooling and secrets
+.env
+.envrc
+.mcp.json
+*.log
+
+# Editors / OS
+.idea/
+.DS_Store
+Thumbs.db
+Desktop.ini

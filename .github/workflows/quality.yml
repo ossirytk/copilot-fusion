@@ -1,0 +1,59 @@
+name: Quality Gate
+
+on:
+  push:
+    branches: ["main"]
+  pull_request:
+    branches: ["**"]
+
+jobs:
+  quality-gate:
+    runs-on: ubuntu-latest
+
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: dtolnay/rust-toolchain@stable
+        if: ${{ hashFiles('**/Cargo.toml') != '' }}
+        with:
+          components: clippy, rustfmt
+
+      - uses: astral-sh/setup-uv@v4
+
+      - name: Set up Python
+        run: uv python install
+
+      - name: Install dependencies
+        run: uv sync --dev
+
+      - name: Lint (ruff)
+        run: uv run ruff check .
+
+      - name: Format check (ruff)
+        run: uv run ruff format --check .
+
+      - name: Tests + coverage
+        run: uv run pytest --cov --cov-report=xml --cov-fail-under=60
+
+      - name: Security audit
+        run: uv run pip-audit
+
+      - name: Install cargo-audit
+        if: ${{ hashFiles('**/Cargo.toml') != '' }}
+        run: cargo install --locked cargo-audit
+
+      - name: Rust format check
+        if: ${{ hashFiles('**/Cargo.toml') != '' }}
+        run: cargo fmt --check
+
+      - name: Rust lint (clippy)
+        if: ${{ hashFiles('**/Cargo.toml') != '' }}
+        run: cargo clippy -- -D warnings
+
+      - name: Rust tests
+        if: ${{ hashFiles('**/Cargo.toml') != '' }}
+        run: cargo test
+
+      - name: Rust security audit
+        if: ${{ hashFiles('**/Cargo.toml') != '' }}
+        run: cargo audit

@@ -1,0 +1,8 @@
+{
+  "servers": {
+    "copilot-fusion": {
+      "command": "copilot-fusion"
+    }
+  }
+}
+
