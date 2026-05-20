@@ -4,12 +4,12 @@ from __future__ import annotations
 
 import json
 import re
-import subprocess
 from collections import Counter
 from pathlib import Path
 from typing import Any
 
 from fastmcp import FastMCP
+from copilot_fusion_shared import resolve_path
 
 try:
     import tomllib
@@ -23,10 +23,6 @@ except ModuleNotFoundError:  # pragma: no cover
 
 
 _REQUESTS = Counter()
-
-
-def _resolve(path: str) -> Path:
-    return Path(path).expanduser().resolve()
 
 
 def _project(node: Any, field: str) -> Any:
@@ -53,7 +49,7 @@ def register(mcp: FastMCP) -> None:
     @mcp.tool
     def fs_glob(base_path: str, patterns: list[str], max_results: int = 5000) -> dict[str, object]:
         _REQUESTS["fs_glob"] += 1
-        root = _resolve(base_path)
+        root = resolve_path(base_path)
         matches: list[str] = []
         for pattern in patterns:
             for match in root.glob(pattern):
@@ -70,7 +66,7 @@ def register(mcp: FastMCP) -> None:
         max_entries: int = 2000,
     ) -> dict[str, object]:
         _REQUESTS["fs_tree"] += 1
-        root = _resolve(path)
+        root = resolve_path(path)
         entries: list[dict[str, object]] = []
         queue: list[tuple[Path, int]] = [(root, 0)]
         while queue and len(entries) < max_entries:
@@ -102,7 +98,7 @@ def register(mcp: FastMCP) -> None:
         pattern = re.compile(query if mode == "regex" else re.escape(query), flags)
         results: list[dict[str, object]] = []
         for p in paths:
-            file_path = _resolve(p)
+            file_path = resolve_path(p)
             if file_path.is_dir():
                 candidates = [x for x in file_path.rglob("*") if x.is_file()]
             else:
@@ -135,7 +131,7 @@ def register(mcp: FastMCP) -> None:
         max_results: int = 5000,
     ) -> dict[str, object]:
         _REQUESTS["json_select"] += 1
-        data = json.loads(_resolve(path).read_text(encoding="utf-8"))
+        data = json.loads(resolve_path(path).read_text(encoding="utf-8"))
         rows = data if isinstance(data, list) else [data]
         selected: list[dict[str, object]] = []
         for row in rows:
@@ -161,7 +157,7 @@ def register(mcp: FastMCP) -> None:
     @mcp.tool
     def yaml_select(path: str, fields: list[str]) -> dict[str, object]:
         _REQUESTS["yaml_select"] += 1
-        resolved = _resolve(path)
+        resolved = resolve_path(path)
         suffix = resolved.suffix.lower()
         if suffix == ".toml":
             if tomllib is None:
@@ -172,31 +168,6 @@ def register(mcp: FastMCP) -> None:
                 return {"error": "pyyaml not installed"}
             data = yaml.safe_load(resolved.read_text(encoding="utf-8"))
         return {"results": {field: _project(data, field) for field in fields}}
-
-    @mcp.tool
-    def git_log(repo_path: str, max_results: int = 100, path_filter: str = "", include_diff_stat: bool = False) -> dict[str, object]:
-        _REQUESTS["git_log"] += 1
-        cwd = str(_resolve(repo_path))
-        fmt = "%H%x1f%an%x1f%ad%x1f%s"
-        cmd = ["git", "log", f"-n{max(1, min(max_results, 500))}", f"--pretty=format:{fmt}"]
-        if include_diff_stat:
-            cmd.append("--name-only")
-        if path_filter:
-            cmd.extend(["--", path_filter])
-        try:
-            result = subprocess.run(cmd, cwd=cwd, capture_output=True, text=True, check=False)
-        except OSError as exc:
-            return {"error": str(exc)}
-        if result.returncode != 0:
-            return {"error": result.stderr.strip() or "git log failed"}
-        lines = [line for line in result.stdout.splitlines() if line.strip()]
-        commits: list[dict[str, object]] = []
-        for line in lines:
-            if "\x1f" not in line:
-                continue
-            sha, author, date, subject = line.split("\x1f", maxsplit=3)
-            commits.append({"sha": sha, "author": author, "date": date, "subject": subject})
-        return {"repo_path": cwd, "commits": commits, "truncated": max_results > 500}
 
     @mcp.tool
     def server_stats() -> dict[str, object]:

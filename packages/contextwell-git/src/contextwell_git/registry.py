@@ -6,23 +6,8 @@ high-utility behavior.
 
 from __future__ import annotations
 
-import subprocess
-from pathlib import Path
-from typing import Any
-
 from fastmcp import FastMCP
-
-
-def _resolve(path: str) -> str:
-    return str(Path(path).expanduser().resolve())
-
-
-def _run(args: list[str], cwd: str) -> tuple[int, str, str]:
-    try:
-        result = subprocess.run(args, cwd=cwd, capture_output=True, text=True, check=False)
-    except OSError as exc:
-        return 1, "", str(exc)
-    return result.returncode, result.stdout, result.stderr
+from copilot_fusion_shared import resolve_path, run_command
 
 
 def _ok(**payload: object) -> dict[str, object]:
@@ -34,19 +19,19 @@ def _err(message: str) -> dict[str, object]:
 
 
 def _run_git(args: list[str], path: str = ".") -> dict[str, object]:
-    cwd = _resolve(path)
-    rc, stdout, stderr = _run(["git", *args], cwd)
-    if rc != 0:
-        return _err(stderr.strip() or f"git {' '.join(args)} failed")
-    return _ok(cwd=cwd, stdout=stdout, stderr=stderr)
+    cwd = resolve_path(path)
+    result = run_command(["git", *args], cwd)
+    if not result.ok:
+        return _err(result.stderr.strip() or f"git {' '.join(args)} failed")
+    return _ok(cwd=str(cwd), stdout=result.stdout, stderr=result.stderr)
 
 
 def _run_gh(args: list[str], path: str = ".") -> dict[str, object]:
-    cwd = _resolve(path)
-    rc, stdout, stderr = _run(["gh", *args], cwd)
-    if rc != 0:
-        return _err(stderr.strip() or f"gh {' '.join(args)} failed")
-    return _ok(cwd=cwd, stdout=stdout, stderr=stderr)
+    cwd = resolve_path(path)
+    result = run_command(["gh", *args], cwd)
+    if not result.ok:
+        return _err(result.stderr.strip() or f"gh {' '.join(args)} failed")
+    return _ok(cwd=str(cwd), stdout=result.stdout, stderr=result.stderr)
 
 
 def register(mcp: FastMCP) -> None:
@@ -91,22 +76,29 @@ def register(mcp: FastMCP) -> None:
         author: str = "",
         file: str = "",
         include_diff_stat: bool = False,
+        repo_path: str = "",
+        max_results: int = 100,
+        path_filter: str = "",
     ) -> dict[str, object]:
+        # Compatibility bridge: accept toolpilot-style parameters as well.
+        effective_path = repo_path or path
+        effective_limit = max_results if repo_path else limit
+        effective_file = path_filter or file
         fmt = "%h %s" if oneline else "%H%x1f%an%x1f%ae%x1f%ad%x1f%s"
-        args = ["log", f"-n{max(1, min(limit, 500))}", f"--pretty=format:{fmt}"]
+        args = ["log", f"-n{max(1, min(effective_limit, 500))}", f"--pretty=format:{fmt}"]
         if author:
             args.append(f"--author={author}")
         target = branch or "HEAD"
         args.append(target)
         if include_diff_stat:
             args.append("--name-only")
-        if file:
-            args.extend(["--", file])
-        result = _run_git(args, path)
+        if effective_file:
+            args.extend(["--", effective_file])
+        result = _run_git(args, effective_path)
         if "error" in result:
             return result
         raw = str(result["stdout"]).strip()
-        return _ok(path=result["cwd"], raw=raw, truncated=limit > 500)
+        return _ok(path=result["cwd"], raw=raw, truncated=effective_limit > 500)
 
     @mcp.tool
     def git_show(ref: str = "HEAD", path: str = ".") -> dict[str, object]:

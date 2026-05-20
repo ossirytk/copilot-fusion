@@ -7,6 +7,13 @@ members = [
     "packages/shared",
 ]
 
+[tool.uv.sources]
+copilot-fusion = { workspace = true }
+copilot-fusion-shared = { workspace = true }
+contextwell-core = { workspace = true }
+contextwell-git = { workspace = true }
+contextwell-tools = { workspace = true }
+
 [dependency-groups]
 dev = [
     "pip-audit>=2.0.0",

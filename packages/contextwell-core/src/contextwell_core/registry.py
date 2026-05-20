@@ -10,6 +10,7 @@ from pathlib import Path
 from typing import Literal
 
 from fastmcp import FastMCP
+from copilot_fusion_shared import app_data_dir, resolve_path
 
 
 MemoryType = Literal["code", "chat", "decision", "todo", "fact"]
@@ -17,9 +18,7 @@ MemoryScope = Literal["project", "global"]
 
 
 def _db_path() -> Path:
-    base = Path.home() / ".copilot-fusion"
-    base.mkdir(parents=True, exist_ok=True)
-    return base / "memories.sqlite3"
+    return app_data_dir() / "memories.sqlite3"
 
 
 def _conn() -> sqlite3.Connection:
@@ -238,7 +237,7 @@ def register(mcp: FastMCP) -> None:
         scope_path: str = "",
     ) -> dict[str, object]:
         del scope_path
-        text = Path(path).expanduser().read_text(encoding="utf-8")
+        text = resolve_path(path).read_text(encoding="utf-8")
         result = remember(content=text, type=type_hint, scope=scope, tags=tags, source=source)
         return {"stored": 1, "memory": result}
 
@@ -296,8 +295,9 @@ def register(mcp: FastMCP) -> None:
         else:
             payload = "\n".join(f"* {m['type'].upper()} {m['id']}\n{m['content']}" for m in memories)
         if path:
-            Path(path).expanduser().write_text(payload, encoding="utf-8")
-            return {"exported": len(memories), "path": str(Path(path).expanduser())}
+            output_path = resolve_path(path)
+            output_path.write_text(payload, encoding="utf-8")
+            return {"exported": len(memories), "path": str(output_path)}
         return {"exported": len(memories), "content": payload}
 
     @mcp.tool

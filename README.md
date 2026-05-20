@@ -1,6 +1,6 @@
 # copilot-fusion
 
-Monorepo scaffold for the consolidated MCP toolkit.
+Unified MCP toolkit that fuses core memory, git workflows, and filesystem/code tools into one server.
 
 ## Layout
 
@@ -12,4 +12,22 @@ Monorepo scaffold for the consolidated MCP toolkit.
 
 ## Status
 
-This is the initial project structure only. Tool migrations and API compatibility work are intentionally deferred.
+Initial migration is active:
+
+- `contextwell-core` exports memory tools (`remember`, `recall`, `list_memories`, etc.)
+- `contextwell-git` exports git and gh tools (`git_*`, `gh_*`)
+- `contextwell-tools` exports filesystem/code tools (`fs_glob`, `fs_tree`, `text_search`, `json_select`, `yaml_select`, `server_stats`)
+
+## Configuration
+
+Domain registration can be controlled with environment variables:
+
+- `FUSION_ENABLE_CORE` (`1`/`0`, default `1`)
+- `FUSION_ENABLE_GIT` (`1`/`0`, default `1`)
+- `FUSION_ENABLE_TOOLS` (`1`/`0`, default `1`)
+
+Example:
+
+```bash
+FUSION_ENABLE_CORE=0 FUSION_ENABLE_GIT=1 FUSION_ENABLE_TOOLS=1 copilot-fusion
+```
