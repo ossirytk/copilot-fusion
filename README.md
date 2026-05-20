@@ -10,6 +10,28 @@ Unified MCP toolkit that fuses core memory, git workflows, and filesystem/code t
 - `packages/contextwell-tools/` — filesystem/code tooling domain (from toolpilot)
 - `packages/shared/` — shared config/utilities used across packages
 
+## Current Architecture
+
+- `copilot-fusion.server:create_server()` is the single registration point for all domains.
+- Domain registration is composable and controlled by `FusionConfig` / `FUSION_ENABLE_*` flags.
+- Shared infrastructure lives in `copilot_fusion_shared`:
+  - `config.py` — runtime domain toggles
+  - `paths.py` — path + data directory resolution
+  - `commands.py` — subprocess execution wrapper
+- `fusion_api_compat` exposes a runtime compatibility matrix against contextwell/gitpilot/toolpilot tool surfaces.
+
+## Overlap Consolidation
+
+The three merged domains had overlap in command execution, path handling, and tool registration concerns.
+
+| Overlap Area | Previous State | Consolidated State |
+|---|---|---|
+| Path resolution | Reimplemented in each domain | `copilot_fusion_shared.resolve_path` |
+| Command execution | Reimplemented in git/tools domains | `copilot_fusion_shared.run_command` |
+| Data directory handling | Local-only in memory domain | `copilot_fusion_shared.app_data_dir` |
+| Domain toggle config | Local defaults in server | `FusionConfig.from_env()` + `FUSION_ENABLE_*` |
+| Tool-surface tracking | Implicit/manual | `fusion_api_compat` + matrix constants |
+
 ## Status
 
 Initial migration is active:
