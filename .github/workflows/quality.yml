@@ -36,7 +36,8 @@ jobs:
         run: uv run pytest --cov --cov-report=xml --cov-fail-under=60
 
       - name: Security audit
-        run: uv run pip-audit
+        # PYSEC-2025-183 affects transitive PyJWT via mcp/fastmcp and currently has no upstream fix.
+        run: uv run pip-audit --ignore-vuln PYSEC-2025-183
 
       - name: Install cargo-audit
         if: ${{ hashFiles('**/Cargo.toml') != '' }}
