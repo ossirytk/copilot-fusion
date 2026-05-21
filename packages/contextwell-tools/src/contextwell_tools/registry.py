@@ -5,7 +5,7 @@ from __future__ import annotations
 import hashlib
 import json
 import re
-from collections import Counter
+from collections import Counter, deque
 from pathlib import Path
 from typing import Any
 
@@ -69,9 +69,9 @@ def register(mcp: FastMCP) -> None:
         _REQUESTS["fs_tree"] += 1
         root = resolve_path(path)
         entries: list[dict[str, object]] = []
-        queue: list[tuple[Path, int]] = [(root, 0)]
+        queue: deque[tuple[Path, int]] = deque([(root, 0)])
         while queue and len(entries) < max_entries:
-            current, depth = queue.pop(0)
+            current, depth = queue.popleft()
             if depth > max_depth:
                 continue
             for child in sorted(current.iterdir(), key=lambda p: p.name):
@@ -96,14 +96,17 @@ def register(mcp: FastMCP) -> None:
     ) -> dict[str, object]:
         _REQUESTS["text_search"] += 1
         flags = 0 if case_sensitive else re.IGNORECASE
-        pattern = re.compile(query if mode == "regex" else re.escape(query), flags)
+        try:
+            pattern = re.compile(query if mode == "regex" else re.escape(query), flags)
+        except re.error as exc:
+            return {"error": f"Invalid regex pattern: {exc}"}
         results: list[dict[str, object]] = []
         for p in paths:
             file_path = resolve_path(p)
             if file_path.is_dir():
-                candidates = [x for x in file_path.rglob("*") if x.is_file()]
+                candidates = (x for x in file_path.rglob("*") if x.is_file())
             else:
-                candidates = [file_path]
+                candidates = iter([file_path])
             for candidate in candidates:
                 try:
                     text = candidate.read_text(encoding="utf-8")
@@ -133,12 +136,10 @@ def register(mcp: FastMCP) -> None:
     ) -> dict[str, object]:
         _REQUESTS["read_file"] += 1
         resolved = resolve_path(path)
-        data = resolved.read_bytes()
-        if max_bytes > 0 and len(data) > max_bytes:
-            data = data[:max_bytes]
-            truncated = True
-        else:
-            truncated = False
+        file_size = resolved.stat().st_size
+        with resolved.open("rb") as fh:
+            data = fh.read(max_bytes if max_bytes > 0 else -1)
+        truncated = max_bytes > 0 and file_size > max_bytes
         text = data.decode("utf-8", errors="replace")
         lines = text.splitlines()
         s = max(1, start_line)
@@ -164,13 +165,18 @@ def register(mcp: FastMCP) -> None:
         max_results: int = 5000,
     ) -> dict[str, object]:
         _REQUESTS["json_select"] += 1
-        data = json.loads(resolve_path(path).read_text(encoding="utf-8"))
+        try:
+            data = json.loads(resolve_path(path).read_text(encoding="utf-8"))
+        except (OSError, json.JSONDecodeError) as exc:
+            return {"error": f"Failed to read/parse JSON: {exc}"}
         rows = data if isinstance(data, list) else [data]
         selected: list[dict[str, object]] = []
         for row in rows:
             if filters:
                 passed = True
                 for filt in filters:
+                    if not isinstance(filt, dict) or not {"field", "op", "value"}.issubset(filt):
+                        return {"error": f"Filter missing required keys (field, op, value): {filt!r}"}
                     value = _project(row, str(filt["field"]))
                     op = str(filt["op"])
                     expected = filt["value"]
@@ -192,14 +198,24 @@ def register(mcp: FastMCP) -> None:
         _REQUESTS["yaml_select"] += 1
         resolved = resolve_path(path)
         suffix = resolved.suffix.lower()
+        try:
+            text = resolved.read_text(encoding="utf-8")
+        except (OSError, UnicodeDecodeError) as exc:
+            return {"error": f"Failed to read file: {exc}"}
         if suffix == ".toml":
             if tomllib is None:
                 return {"error": "tomllib unavailable in this Python runtime"}
-            data = tomllib.loads(resolved.read_text(encoding="utf-8"))
+            try:
+                data = tomllib.loads(text)
+            except ValueError as exc:
+                return {"error": f"Failed to parse TOML: {exc}"}
         else:
             if yaml is None:
                 return {"error": "pyyaml not installed"}
-            data = yaml.safe_load(resolved.read_text(encoding="utf-8"))
+            try:
+                data = yaml.safe_load(text)
+            except yaml.YAMLError as exc:
+                return {"error": f"Failed to parse YAML: {exc}"}
         return {"results": {field: _project(data, field) for field in fields}}
 
     @mcp.tool

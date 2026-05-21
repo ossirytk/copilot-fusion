@@ -1,6 +1,6 @@
 """Unified MCP server entry point for copilot-fusion."""
 
-from copilot_fusion.api_compat import active_tool_names, build_matrix
+from copilot_fusion.api_compat import build_matrix
 from contextwell_core import register as register_core
 from contextwell_git import register as register_git
 from contextwell_tools import register as register_tools
@@ -34,8 +34,9 @@ def create_server(config: FusionConfig | None = None) -> FastMCP:
         }
 
     @mcp.tool(name="fusion_api_compat")
-    def fusion_api_compat() -> dict[str, object]:
-        names = active_tool_names(effective_config)
+    async def fusion_api_compat() -> dict[str, object]:
+        tools = await mcp.list_tools()
+        names = {tool.name for tool in tools}
         return build_matrix(names)
 
     return mcp

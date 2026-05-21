@@ -31,13 +31,25 @@ def _conn() -> sqlite3.Connection:
             content TEXT NOT NULL,
             type TEXT NOT NULL,
             scope TEXT NOT NULL,
+            scope_path TEXT NOT NULL DEFAULT '',
             tags TEXT NOT NULL,
             source TEXT NOT NULL,
+            expires_at TEXT NOT NULL DEFAULT '',
             created_at TEXT NOT NULL,
             updated_at TEXT NOT NULL
         )
         """
     )
+    # Migrate older schemas that lack scope_path / expires_at columns.
+    _NEW_COLUMNS = {
+        "scope_path": "ALTER TABLE memories ADD COLUMN scope_path TEXT NOT NULL DEFAULT ''",
+        "expires_at": "ALTER TABLE memories ADD COLUMN expires_at TEXT NOT NULL DEFAULT ''",
+    }
+    existing_cols = {row[1] for row in conn.execute("PRAGMA table_info(memories)").fetchall()}
+    for col, stmt in _NEW_COLUMNS.items():
+        if col not in existing_cols:
+            conn.execute(stmt)
+            conn.commit()
     return conn
 
 
@@ -63,23 +75,23 @@ def register(mcp: FastMCP) -> None:
         expires_at: str = "",
         scope_path: str = "",
     ) -> dict[str, object]:
-        del expires_at, scope_path
         now = _iso_now()
         memory_id = str(uuid.uuid4())
         parsed_tags = _parse_tags(tags)
         conn = _conn()
         if not allow_duplicate:
             existing = conn.execute(
-                "SELECT id FROM memories WHERE content = ? AND scope = ? LIMIT 1", (content, scope)
+                "SELECT id FROM memories WHERE content = ? AND scope = ? AND scope_path = ? LIMIT 1",
+                (content, scope, scope_path),
             ).fetchone()
             if existing:
                 return {"id": existing["id"], "duplicate": True}
         conn.execute(
             """
-            INSERT INTO memories (id, content, type, scope, tags, source, created_at, updated_at)
-            VALUES (?, ?, ?, ?, ?, ?, ?, ?)
+            INSERT INTO memories (id, content, type, scope, scope_path, tags, source, expires_at, created_at, updated_at)
+            VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
             """,
-            (memory_id, content, type, scope, json.dumps(parsed_tags), source, now, now),
+            (memory_id, content, type, scope, scope_path, json.dumps(parsed_tags), source, expires_at, now, now),
         )
         conn.commit()
         conn.close()
@@ -98,7 +110,7 @@ def register(mcp: FastMCP) -> None:
         include_score: bool = False,
         scope_path: str = "",
     ) -> list[dict[str, object]]:
-        del rerank, scope_path
+        del rerank
         conn = _conn()
         rows = conn.execute("SELECT * FROM memories ORDER BY updated_at DESC").fetchall()
         conn.close()
@@ -107,6 +119,8 @@ def register(mcp: FastMCP) -> None:
         scored: list[tuple[float, sqlite3.Row]] = []
         for row in rows:
             if scope and row["scope"] != scope:
+                continue
+            if scope_path and row["scope_path"] != scope_path:
                 continue
             if type and row["type"] != type:
                 continue
@@ -134,6 +148,7 @@ def register(mcp: FastMCP) -> None:
                 "content": row["content"],
                 "type": row["type"],
                 "scope": row["scope"],
+                "scope_path": row["scope_path"],
                 "tags": json.loads(row["tags"]),
                 "source": row["source"],
                 "created_at": row["created_at"],
@@ -147,11 +162,27 @@ def register(mcp: FastMCP) -> None:
     @mcp.tool
     def forget(memory_id: str) -> str:
         conn = _conn()
-        result = conn.execute("DELETE FROM memories WHERE id = ? OR substr(id, 1, 8) = ?", (memory_id, memory_id))
+        # Try exact match first.
+        exact = conn.execute("SELECT id FROM memories WHERE id = ?", (memory_id,)).fetchone()
+        if exact:
+            conn.execute("DELETE FROM memories WHERE id = ?", (memory_id,))
+            conn.commit()
+            conn.close()
+            return "Memory deleted."
+        # Fall back to prefix match, but only when unambiguous.
+        prefix_rows = conn.execute(
+            "SELECT id FROM memories WHERE substr(id, 1, ?) = ?", (len(memory_id), memory_id)
+        ).fetchall()
+        if len(prefix_rows) == 0:
+            conn.close()
+            return "No matching memory found."
+        if len(prefix_rows) > 1:
+            conn.close()
+            return f"Ambiguous prefix '{memory_id}' matches {len(prefix_rows)} memories. Please provide the full ID."
+        target_id = prefix_rows[0]["id"]
+        conn.execute("DELETE FROM memories WHERE id = ?", (target_id,))
         conn.commit()
         conn.close()
-        if result.rowcount <= 0:
-            return "No matching memory found."
         return "Memory deleted."
 
     @mcp.tool
@@ -164,7 +195,6 @@ def register(mcp: FastMCP) -> None:
         until: str = "",
         scope_path: str = "",
     ) -> list[dict[str, object]]:
-        del scope_path
         conn = _conn()
         rows = conn.execute("SELECT * FROM memories ORDER BY updated_at DESC").fetchall()
         conn.close()
@@ -172,6 +202,8 @@ def register(mcp: FastMCP) -> None:
         output: list[dict[str, object]] = []
         for row in rows:
             if scope and row["scope"] != scope:
+                continue
+            if scope_path and row["scope_path"] != scope_path:
                 continue
             if type and row["type"] != type:
                 continue
@@ -188,6 +220,7 @@ def register(mcp: FastMCP) -> None:
                     "content": row["content"],
                     "type": row["type"],
                     "scope": row["scope"],
+                    "scope_path": row["scope_path"],
                     "tags": list(row_tags),
                     "source": row["source"],
                     "created_at": row["created_at"],
@@ -236,9 +269,8 @@ def register(mcp: FastMCP) -> None:
         source: str = "",
         scope_path: str = "",
     ) -> dict[str, object]:
-        del scope_path
         text = resolve_path(path).read_text(encoding="utf-8")
-        result = remember(content=text, type=type_hint, scope=scope, tags=tags, source=source)
+        result = remember(content=text, type=type_hint, scope=scope, tags=tags, source=source, scope_path=scope_path)
         return {"stored": 1, "memory": result}
 
     @mcp.tool
@@ -267,11 +299,13 @@ def register(mcp: FastMCP) -> None:
         source: str = "",
         scope_path: str = "",
     ) -> dict[str, object]:
-        del threshold, scope_path
-        listed = list_memories(scope=scope, type=type, tags=tags, limit=1000)
+        del threshold
+        listed = list_memories(scope=scope, type=type, tags=tags, limit=1000, scope_path=scope_path)
         for row in listed:
             forget(str(row["id"]))
-        new_memory = remember(content=summary, type="decision", scope=scope or "global", tags=tags, source=source)
+        new_memory = remember(
+            content=summary, type="decision", scope=scope or "global", tags=tags, source=source, scope_path=scope_path
+        )
         return {"compressed": len(listed), "summary_memory": new_memory}
 
     @mcp.tool
@@ -286,8 +320,9 @@ def register(mcp: FastMCP) -> None:
         limit: int = 1000,
         scope_path: str = "",
     ) -> dict[str, object]:
-        del scope_path
-        memories = list_memories(scope=scope, type=type, tags=tags, since=since, until=until, limit=limit)
+        memories = list_memories(
+            scope=scope, type=type, tags=tags, since=since, until=until, limit=limit, scope_path=scope_path
+        )
         if format == "json":
             payload = json.dumps(memories, indent=2)
         elif format == "markdown":
@@ -320,7 +355,12 @@ def register(mcp: FastMCP) -> None:
 
     @mcp.tool
     def purge_expired() -> str:
-        return "No expiry support in initial migration."
+        now = _iso_now()
+        conn = _conn()
+        result = conn.execute("DELETE FROM memories WHERE expires_at != '' AND expires_at < ?", (now,))
+        conn.commit()
+        conn.close()
+        return f"Purged {result.rowcount} expired memories."
 
     @mcp.tool
     def reembed_all(batch_size: int = 64) -> dict:

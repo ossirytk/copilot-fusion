@@ -156,8 +156,11 @@ def register(mcp: FastMCP) -> None:
         mode: str = "mixed",
         files: list[str] | None = None,
     ) -> dict[str, object]:
+        _VALID_MODES = {"soft", "mixed", "hard", "merge", "keep"}
+        if mode not in _VALID_MODES:
+            return _err(f"Invalid mode {mode!r}. Must be one of: {', '.join(sorted(_VALID_MODES))}")
         if files:
-            return _run_git(["reset", "HEAD", *files], path)
+            return _run_git(["reset", ref, "--", *files], path)
         return _run_git(["reset", f"--{mode}", ref], path)
 
     @mcp.tool

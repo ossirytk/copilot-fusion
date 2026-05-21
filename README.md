@@ -12,7 +12,7 @@ Unified MCP toolkit that fuses core memory, git workflows, and filesystem/code t
 
 ## Current Architecture
 
-- `copilot-fusion.server:create_server()` is the single registration point for all domains.
+- `copilot_fusion.server:create_server()` is the single registration point for all domains.
 - Domain registration is composable and controlled by `FusionConfig` / `FUSION_ENABLE_*` flags.
 - Shared infrastructure lives in `copilot_fusion_shared`:
   - `config.py` — runtime domain toggles
