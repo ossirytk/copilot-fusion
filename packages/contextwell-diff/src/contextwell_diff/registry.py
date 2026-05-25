@@ -4,7 +4,6 @@ from __future__ import annotations
 
 import difflib
 import re
-from pathlib import Path
 
 from fastmcp import FastMCP
 from copilot_fusion_shared import resolve_path, run_command
@@ -23,7 +22,7 @@ def _parse_unified_diff(diff_text: str) -> list[dict[str, object]]:
         file_match = file_header_re.match(raw_line)
         if file_match:
             if current_hunk and current_file is not None:
-                cast(current_file["hunks"]).append(current_hunk)  # type: ignore[arg-type]
+                current_file["hunks"].append(current_hunk)  # type: ignore[union-attr]
                 current_hunk = None
             current_file = {
                 "path": file_match.group(1),
@@ -125,7 +124,8 @@ def register(mcp: FastMCP) -> None:
             return {"error": str(exc)}
         unified = list(
             difflib.unified_diff(
-                lines_a, lines_b,
+                lines_a,
+                lines_b,
                 fromfile=f"a/{resolved_a.name}",
                 tofile=f"b/{resolved_b.name}",
             )
@@ -138,8 +138,8 @@ def register(mcp: FastMCP) -> None:
         files = _parse_unified_diff(diff_text)
         if not files:
             # Fallback: construct a minimal file entry from raw counts.
-            adds = sum(1 for l in unified if l.startswith("+") and not l.startswith("+++"))
-            dels = sum(1 for l in unified if l.startswith("-") and not l.startswith("---"))
+            adds = sum(1 for line in unified if line.startswith("+") and not line.startswith("+++"))
+            dels = sum(1 for line in unified if line.startswith("-") and not line.startswith("---"))
             files = [{"path": resolved_b.name, "additions": adds, "deletions": dels, "hunks": []}]
         return _summarize_files(files)
 

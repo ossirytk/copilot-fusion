@@ -123,16 +123,7 @@ def test_diff_refs_invalid(tmp_path: Path) -> None:
 
 
 def test_summarize_diff() -> None:
-    raw_diff = (
-        "--- a/foo.py\n"
-        "+++ b/foo.py\n"
-        "@@ -1,3 +1,4 @@\n"
-        " line1\n"
-        "-line2\n"
-        "+line2 changed\n"
-        "+line3 new\n"
-        " line3\n"
-    )
+    raw_diff = "--- a/foo.py\n+++ b/foo.py\n@@ -1,3 +1,4 @@\n line1\n-line2\n+line2 changed\n+line3 new\n line3\n"
     result = _call("summarize_diff", {"diff_text": raw_diff})
     assert isinstance(result, dict)
     assert result.get("total_files", 0) == 1

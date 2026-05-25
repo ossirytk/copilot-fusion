@@ -290,6 +290,7 @@ def register(mcp: FastMCP) -> None:
         is_markdown = resolved.suffix.lower() in {".md", ".markdown"}
         if split_headers and is_markdown:
             import re as _re
+
             sections = _re.split(r"(?m)^(#{1,6} .+)$", text)
             chunks: list[str] = []
             i = 0
@@ -311,7 +312,9 @@ def register(mcp: FastMCP) -> None:
             chunks = [text]
         stored: list[dict[str, object]] = []
         for chunk in chunks:
-            stored.append(remember(content=chunk, type=type_hint, scope=scope, tags=tags, source=source, scope_path=scope_path))
+            stored.append(
+                remember(content=chunk, type=type_hint, scope=scope, tags=tags, source=source, scope_path=scope_path)
+            )
         return {"stored": len(stored), "memories": stored}
 
     @mcp.tool

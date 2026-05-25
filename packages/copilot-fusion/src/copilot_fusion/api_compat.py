@@ -117,9 +117,5 @@ def build_matrix(tool_names: set[str]) -> dict[str, object]:
             }
             for domain, value in matrix.items()
         },
-        "known_gaps": {
-            domain: value.missing
-            for domain, value in matrix.items()
-            if value.missing
-        },
+        "known_gaps": {domain: value.missing for domain, value in matrix.items() if value.missing},
     }
