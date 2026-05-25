@@ -42,6 +42,7 @@ GITPILOT_TOOLS = {
     "gh_pr_view",
     "gh_issue_create",
     "gh_issue_list",
+    "gh_issue_view",
 }
 
 TOOLPILOT_TOOLS = {
@@ -54,6 +55,13 @@ TOOLPILOT_TOOLS = {
     "file_hash",
     "git_log",
     "server_stats",
+}
+
+CONTEXTWELL_DIFF_TOOLS = {
+    "diff_staged",
+    "diff_refs",
+    "diff_files",
+    "summarize_diff",
 }
 
 
@@ -80,6 +88,9 @@ def active_tool_names(config: FusionConfig) -> set[str]:
         # git_log is provided by the git domain to avoid duplicate registration.
         if not config.enable_git:
             names.discard("git_log")
+    if config.enable_diff:
+        names.update(CONTEXTWELL_DIFF_TOOLS)
+        names.add("fusion_diff_health")
     return names
 
 
@@ -90,6 +101,7 @@ def build_matrix(tool_names: set[str]) -> dict[str, object]:
         "contextwell": CONTEXTWELL_TOOLS,
         "gitpilot": GITPILOT_TOOLS,
         "toolpilot": TOOLPILOT_TOOLS,
+        "diffpilot": CONTEXTWELL_DIFF_TOOLS,
     }
     matrix: dict[str, DomainMatrix] = {}
     for domain, expected in domains.items():
@@ -105,5 +117,9 @@ def build_matrix(tool_names: set[str]) -> dict[str, object]:
             }
             for domain, value in matrix.items()
         },
-        "known_gaps": {"toolpilot": []},
+        "known_gaps": {
+            domain: value.missing
+            for domain, value in matrix.items()
+            if value.missing
+        },
     }

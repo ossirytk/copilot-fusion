@@ -2,6 +2,7 @@
 members = [
     "packages/copilot-fusion",
     "packages/contextwell-core",
+    "packages/contextwell-diff",
     "packages/contextwell-git",
     "packages/contextwell-tools",
     "packages/shared",
@@ -11,6 +12,7 @@ members = [
 copilot-fusion = { workspace = true }
 copilot-fusion-shared = { workspace = true }
 contextwell-core = { workspace = true }
+contextwell-diff = { workspace = true }
 contextwell-git = { workspace = true }
 contextwell-tools = { workspace = true }
 

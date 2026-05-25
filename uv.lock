@@ -5,6 +5,7 @@ requires-python = ">=3.12"
 [manifest]
 members = [
     "contextwell-core",
+    "contextwell-diff",
     "contextwell-git",
     "contextwell-tools",
     "copilot-fusion",
@@ -317,6 +318,21 @@ requires-dist = [
 ]
 
 [[package]]
+name = "contextwell-diff"
+version = "0.1.0"
+source = { editable = "packages/contextwell-diff" }
+dependencies = [
+    { name = "copilot-fusion-shared" },
+    { name = "fastmcp" },
+]
+
+[package.metadata]
+requires-dist = [
+    { name = "copilot-fusion-shared", editable = "packages/shared" },
+    { name = "fastmcp", specifier = ">=3.2.0" },
+]
+
+[[package]]
 name = "contextwell-git"
 version = "0.1.0"
 source = { editable = "packages/contextwell-git" }
@@ -354,6 +370,7 @@ version = "0.1.0"
 source = { editable = "packages/copilot-fusion" }
 dependencies = [
     { name = "contextwell-core" },
+    { name = "contextwell-diff" },
     { name = "contextwell-git" },
     { name = "contextwell-tools" },
     { name = "copilot-fusion-shared" },
@@ -363,6 +380,7 @@ dependencies = [
 [package.metadata]
 requires-dist = [
     { name = "contextwell-core", editable = "packages/contextwell-core" },
+    { name = "contextwell-diff", editable = "packages/contextwell-diff" },
     { name = "contextwell-git", editable = "packages/contextwell-git" },
     { name = "contextwell-tools", editable = "packages/contextwell-tools" },
     { name = "copilot-fusion-shared", editable = "packages/shared" },

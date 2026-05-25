@@ -304,6 +304,10 @@ def register(mcp: FastMCP) -> None:
             args.extend(["--author", author])
         return _run_gh(args, path)
 
+    @mcp.tool
+    def gh_issue_view(issue: str, path: str = ".") -> dict[str, object]:
+        return _run_gh(["issue", "view", issue], path)
+
     @mcp.tool(name="fusion_git_health")
     def fusion_git_health() -> dict[str, str]:
         return {"domain": "git", "status": "ready"}
