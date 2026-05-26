@@ -221,16 +221,18 @@ def register(mcp: FastMCP) -> None:
         if until:
             sql += " AND created_at <= ?"
             params.append(until)
+        required_tags = _parse_tags(tags)
+        if required_tags:
+            placeholders = ",".join("?" * len(required_tags))
+            sql += f" AND EXISTS (SELECT 1 FROM json_each(tags) WHERE value IN ({placeholders}))"
+            params.extend(required_tags)
         sql += " ORDER BY updated_at DESC LIMIT ?"
         params.append(max(1, limit))
         rows = conn.execute(sql, params).fetchall()
         conn.close()
-        required_tags = set(_parse_tags(tags))
         output: list[dict[str, object]] = []
         for row in rows:
             row_tags = set(json.loads(row["tags"]))
-            if required_tags and not (required_tags & row_tags):
-                continue
             output.append(
                 {
                     "id": row["id"],
