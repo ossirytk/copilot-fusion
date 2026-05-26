@@ -11,6 +11,7 @@ class FusionConfig:
     enable_core: bool = True
     enable_git: bool = True
     enable_tools: bool = True
+    enable_diff: bool = True
 
     @classmethod
     def from_env(cls) -> "FusionConfig":
@@ -20,6 +21,7 @@ class FusionConfig:
             enable_core=_env_bool("FUSION_ENABLE_CORE", True),
             enable_git=_env_bool("FUSION_ENABLE_GIT", True),
             enable_tools=_env_bool("FUSION_ENABLE_TOOLS", True),
+            enable_diff=_env_bool("FUSION_ENABLE_DIFF", True),
         )
 
 

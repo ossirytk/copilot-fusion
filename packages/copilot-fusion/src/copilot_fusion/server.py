@@ -2,6 +2,7 @@
 
 from copilot_fusion.api_compat import build_matrix
 from contextwell_core import register as register_core
+from contextwell_diff import register as register_diff
 from contextwell_git import register as register_git
 from contextwell_tools import register as register_tools
 from copilot_fusion_shared import FusionConfig
@@ -20,6 +21,8 @@ def create_server(config: FusionConfig | None = None) -> FastMCP:
         register_git(mcp)
     if effective_config.enable_tools:
         register_tools(mcp)
+    if effective_config.enable_diff:
+        register_diff(mcp)
 
     @mcp.tool(name="fusion_health")
     def fusion_health() -> dict[str, object]:
@@ -30,6 +33,7 @@ def create_server(config: FusionConfig | None = None) -> FastMCP:
                 "core": effective_config.enable_core,
                 "git": effective_config.enable_git,
                 "tools": effective_config.enable_tools,
+                "diff": effective_config.enable_diff,
             },
         }
 

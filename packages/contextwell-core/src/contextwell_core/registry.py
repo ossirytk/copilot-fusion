@@ -112,22 +112,30 @@ def register(mcp: FastMCP) -> None:
     ) -> list[dict[str, object]]:
         del rerank
         conn = _conn()
-        rows = conn.execute("SELECT * FROM memories ORDER BY updated_at DESC").fetchall()
+        sql = "SELECT * FROM memories WHERE 1=1"
+        params: list[object] = []
+        if scope:
+            sql += " AND scope = ?"
+            params.append(scope)
+        if scope_path:
+            sql += " AND scope_path = ?"
+            params.append(scope_path)
+        if type:
+            sql += " AND type = ?"
+            params.append(type)
+        if since:
+            sql += " AND created_at >= ?"
+            params.append(since)
+        if until:
+            sql += " AND created_at <= ?"
+            params.append(until)
+        sql += " ORDER BY updated_at DESC"
+        rows = conn.execute(sql, params).fetchall()
         conn.close()
         q = query.lower().strip()
         required_tags = set(_parse_tags(tags))
         scored: list[tuple[float, sqlite3.Row]] = []
         for row in rows:
-            if scope and row["scope"] != scope:
-                continue
-            if scope_path and row["scope_path"] != scope_path:
-                continue
-            if type and row["type"] != type:
-                continue
-            if since and row["created_at"] < since:
-                continue
-            if until and row["created_at"] > until:
-                continue
             row_tags = set(json.loads(row["tags"]))
             if required_tags and not (required_tags & row_tags):
                 continue
@@ -196,24 +204,35 @@ def register(mcp: FastMCP) -> None:
         scope_path: str = "",
     ) -> list[dict[str, object]]:
         conn = _conn()
-        rows = conn.execute("SELECT * FROM memories ORDER BY updated_at DESC").fetchall()
+        sql = "SELECT * FROM memories WHERE 1=1"
+        params: list[object] = []
+        if scope:
+            sql += " AND scope = ?"
+            params.append(scope)
+        if scope_path:
+            sql += " AND scope_path = ?"
+            params.append(scope_path)
+        if type:
+            sql += " AND type = ?"
+            params.append(type)
+        if since:
+            sql += " AND created_at >= ?"
+            params.append(since)
+        if until:
+            sql += " AND created_at <= ?"
+            params.append(until)
+        required_tags = _parse_tags(tags)
+        if required_tags:
+            placeholders = ",".join("?" * len(required_tags))
+            sql += f" AND EXISTS (SELECT 1 FROM json_each(tags) WHERE value IN ({placeholders}))"
+            params.extend(required_tags)
+        sql += " ORDER BY updated_at DESC LIMIT ?"
+        params.append(max(1, limit))
+        rows = conn.execute(sql, params).fetchall()
         conn.close()
-        required_tags = set(_parse_tags(tags))
         output: list[dict[str, object]] = []
         for row in rows:
-            if scope and row["scope"] != scope:
-                continue
-            if scope_path and row["scope_path"] != scope_path:
-                continue
-            if type and row["type"] != type:
-                continue
-            if since and row["created_at"] < since:
-                continue
-            if until and row["created_at"] > until:
-                continue
             row_tags = set(json.loads(row["tags"]))
-            if required_tags and not (required_tags & row_tags):
-                continue
             output.append(
                 {
                     "id": row["id"],
@@ -227,8 +246,6 @@ def register(mcp: FastMCP) -> None:
                     "updated_at": row["updated_at"],
                 }
             )
-            if len(output) >= max(1, limit):
-                break
         return output
 
     @mcp.tool
@@ -268,10 +285,39 @@ def register(mcp: FastMCP) -> None:
         type_hint: MemoryType = "fact",
         source: str = "",
         scope_path: str = "",
+        split_headers: bool = True,
     ) -> dict[str, object]:
-        text = resolve_path(path).read_text(encoding="utf-8")
-        result = remember(content=text, type=type_hint, scope=scope, tags=tags, source=source, scope_path=scope_path)
-        return {"stored": 1, "memory": result}
+        resolved = resolve_path(path)
+        text = resolved.read_text(encoding="utf-8")
+        is_markdown = resolved.suffix.lower() in {".md", ".markdown"}
+        if split_headers and is_markdown:
+            import re as _re
+
+            sections = _re.split(r"(?m)^(#{1,6} .+)$", text)
+            chunks: list[str] = []
+            i = 0
+            while i < len(sections):
+                part = sections[i].strip()
+                if _re.match(r"^#{1,6} ", part):
+                    header = part
+                    body = sections[i + 1].strip() if i + 1 < len(sections) else ""
+                    i += 2
+                    chunk = f"{header}\n\n{body}".strip() if body else header
+                else:
+                    chunk = part
+                    i += 1
+                if chunk:
+                    chunks.append(chunk)
+            if not chunks:
+                chunks = [text]
+        else:
+            chunks = [text]
+        stored: list[dict[str, object]] = []
+        for chunk in chunks:
+            stored.append(
+                remember(content=chunk, type=type_hint, scope=scope, tags=tags, source=source, scope_path=scope_path)
+            )
+        return {"stored": len(stored), "memories": stored}
 
     @mcp.tool
     def remember_batch(memories: list[dict], allow_duplicate: bool = False) -> dict[str, object]:
@@ -298,9 +344,12 @@ def register(mcp: FastMCP) -> None:
         tags: list[str] | None = None,
         source: str = "",
         scope_path: str = "",
+        dry_run: bool = False,
     ) -> dict[str, object]:
         del threshold
         listed = list_memories(scope=scope, type=type, tags=tags, limit=1000, scope_path=scope_path)
+        if dry_run:
+            return {"dry_run": True, "would_compress": len(listed), "memories": listed}
         for row in listed:
             forget(str(row["id"]))
         new_memory = remember(

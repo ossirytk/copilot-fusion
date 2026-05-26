@@ -212,11 +212,12 @@ def test_remember_file() -> None:
     result = _call("remember_file", {"path": tmp_path, "scope": "global", "tags": ["file"]})
     assert isinstance(result, dict)
     assert result.get("stored") == 1
-    memory = result.get("memory", {})
-    assert isinstance(memory, dict)
-    assert "id" in memory
+    memories = result.get("memories", [])
+    assert isinstance(memories, list)
+    assert len(memories) == 1
+    assert "id" in memories[0]
 
-    _call("forget", {"memory_id": memory["id"]})
+    _call("forget", {"memory_id": memories[0]["id"]})
 
 
 def test_remember_batch() -> None:

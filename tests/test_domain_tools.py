@@ -88,3 +88,79 @@ def test_git_status_on_initialized_repo() -> None:
         assert isinstance(init, dict)
         assert "error" not in init
         assert "status" in init
+
+
+def test_diff_files() -> None:
+    with tempfile.TemporaryDirectory() as tmp:
+        root = Path(tmp)
+        (root / "a.txt").write_text("line1\nline2\nline3\n", encoding="utf-8")
+        (root / "b.txt").write_text("line1\nline2 changed\nline3\nline4\n", encoding="utf-8")
+
+        result = _call("diff_files", {"path_a": str(root / "a.txt"), "path_b": str(root / "b.txt")})
+        assert isinstance(result, dict)
+        assert result.get("total_files", 0) >= 1
+        assert result.get("total_additions", 0) >= 1
+        assert result.get("total_deletions", 0) >= 1
+
+
+def test_diff_staged_empty(tmp_path: Path) -> None:
+    import subprocess
+
+    subprocess.run(["git", "init"], cwd=tmp_path, check=False, capture_output=True)
+    result = _call("diff_staged", {"path": str(tmp_path)})
+    assert isinstance(result, dict)
+    # No staged changes — expect empty files list.
+    assert result.get("total_files", 0) == 0
+
+
+def test_diff_refs_invalid(tmp_path: Path) -> None:
+    import subprocess
+
+    subprocess.run(["git", "init"], cwd=tmp_path, check=False, capture_output=True)
+    result = _call("diff_refs", {"ref_a": "HEAD", "ref_b": "nonexistent-branch", "path": str(tmp_path)})
+    assert isinstance(result, dict)
+    assert "error" in result
+
+
+def test_summarize_diff() -> None:
+    raw_diff = "--- a/foo.py\n+++ b/foo.py\n@@ -1,3 +1,4 @@\n line1\n-line2\n+line2 changed\n+line3 new\n line3\n"
+    result = _call("summarize_diff", {"diff_text": raw_diff})
+    assert isinstance(result, dict)
+    assert result.get("total_files", 0) == 1
+    assert result.get("total_additions", 0) == 2
+    assert result.get("total_deletions", 0) == 1
+
+
+def test_compress_memories_dry_run() -> None:
+    with tempfile.TemporaryDirectory() as tmp:
+        _call("remember", {"content": "dry-run-test-memory", "scope": "project", "scope_path": tmp})
+        result = _call(
+            "compress_memories",
+            {"summary": "summary", "scope": "project", "scope_path": tmp, "dry_run": True},
+        )
+        assert isinstance(result, dict)
+        assert result.get("dry_run") is True
+        assert result.get("would_compress", 0) >= 1
+        # Memory should still exist after dry run.
+        listed = _call("list_memories", {"scope": "project", "scope_path": tmp})
+        assert isinstance(listed, list)
+        assert any("dry-run-test-memory" in str(m.get("content", "")) for m in listed if isinstance(m, dict))
+        # Clean up.
+        for m in listed:
+            if isinstance(m, dict) and "dry-run-test-memory" in str(m.get("content", "")):
+                _call("forget", {"memory_id": m["id"]})
+
+
+def test_remember_file_markdown_split() -> None:
+    with tempfile.NamedTemporaryFile(mode="w", suffix=".md", delete=False) as f:
+        f.write("# Header One\n\nContent of section one.\n\n# Header Two\n\nContent of section two.\n")
+        tmp_path = f.name
+
+    result = _call("remember_file", {"path": tmp_path, "split_headers": True})
+    assert isinstance(result, dict)
+    assert result.get("stored", 0) == 2
+    memories = result.get("memories", [])
+    assert len(memories) == 2
+    for m in memories:
+        if isinstance(m, dict) and "id" in m:
+            _call("forget", {"memory_id": m["id"]})

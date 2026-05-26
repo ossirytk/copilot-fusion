@@ -8,6 +8,7 @@ dependencies = [
     "fastmcp>=3.2.0",
     "copilot-fusion-shared>=0.1.0",
     "contextwell-core>=0.1.0",
+    "contextwell-diff>=0.1.0",
     "contextwell-git>=0.1.0",
     "contextwell-tools>=0.1.0",
 ]
