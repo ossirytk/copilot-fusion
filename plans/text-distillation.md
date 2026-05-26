@@ -4,7 +4,7 @@
 
 Design a capability that extracts essential signal from large text (error logs, web pages, long docs) with predictable output for Copilot workflows.
 
-This document is **idea-phase only** (no implementation yet).
+This document is the source-of-truth plan for the distillation track.
 
 ---
 

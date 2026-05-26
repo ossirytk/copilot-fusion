@@ -97,6 +97,8 @@ The next feature tracks are being planned separately so they can be implemented 
 - safe file editing
 - code navigation / symbol awareness
 
+See `plans/README.md` for the implementation plan files.
+
 ## Performance Benchmarking
 
 Run the local benchmark harness:
