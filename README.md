@@ -1,6 +1,6 @@
 # copilot-fusion
 
-Unified MCP toolkit that fuses core memory, git workflows, and filesystem/code tools into one server.
+Unified MCP toolkit that fuses core memory, git workflows, filesystem/code tools, and structured diffs into one server.
 
 ## Layout
 
@@ -8,6 +8,7 @@ Unified MCP toolkit that fuses core memory, git workflows, and filesystem/code t
 - `packages/contextwell-core/` — memory and semantic retrieval domain (from contextwell)
 - `packages/contextwell-git/` — git workflow domain (from gitpilot)
 - `packages/contextwell-tools/` — filesystem/code tooling domain (from toolpilot)
+- `packages/contextwell-diff/` — structured diff domain (from diffpilot)
 - `packages/shared/` — shared config/utilities used across packages
 
 ## Current Architecture
@@ -18,16 +19,16 @@ Unified MCP toolkit that fuses core memory, git workflows, and filesystem/code t
   - `config.py` — runtime domain toggles
   - `paths.py` — path + data directory resolution
   - `commands.py` — subprocess execution wrapper
-- `fusion_api_compat` exposes a runtime compatibility matrix against contextwell/gitpilot/toolpilot tool surfaces.
+- `fusion_api_compat` exposes a runtime compatibility matrix against contextwell/gitpilot/toolpilot/diffpilot tool surfaces.
 
 ## Overlap Consolidation
 
-The three merged domains had overlap in command execution, path handling, and tool registration concerns.
+The merged domains had overlap in command execution, path handling, and tool registration concerns.
 
 | Overlap Area | Previous State | Consolidated State |
 |---|---|---|
 | Path resolution | Reimplemented in each domain | `copilot_fusion_shared.resolve_path` |
-| Command execution | Reimplemented in git/tools domains | `copilot_fusion_shared.run_command` |
+| Command execution | Reimplemented in git/diff domains | `copilot_fusion_shared.run_command` |
 | Data directory handling | Local-only in memory domain | `copilot_fusion_shared.app_data_dir` |
 | Domain toggle config | Local defaults in server | `FusionConfig.from_env()` + `FUSION_ENABLE_*` |
 | Tool-surface tracking | Implicit/manual | `fusion_api_compat` + matrix constants |
@@ -39,6 +40,7 @@ Initial migration is active:
 - `contextwell-core` exports memory tools (`remember`, `recall`, `list_memories`, etc.)
 - `contextwell-git` exports git and gh tools (`git_*`, `gh_*`)
 - `contextwell-tools` exports filesystem/code tools (`fs_glob`, `fs_tree`, `text_search`, `read_file`, `json_select`, `yaml_select`, `file_hash`, `server_stats`)
+- `contextwell-diff` exports structured diff tools (`diff_staged`, `diff_refs`, `diff_files`, `summarize_diff`)
 
 ## Configuration
 
@@ -47,11 +49,12 @@ Domain registration can be controlled with environment variables:
 - `FUSION_ENABLE_CORE` (`1`/`0`, default `1`)
 - `FUSION_ENABLE_GIT` (`1`/`0`, default `1`)
 - `FUSION_ENABLE_TOOLS` (`1`/`0`, default `1`)
+- `FUSION_ENABLE_DIFF` (`1`/`0`, default `1`)
 
 Example:
 
 ```bash
-FUSION_ENABLE_CORE=0 FUSION_ENABLE_GIT=1 FUSION_ENABLE_TOOLS=1 copilot-fusion
+FUSION_ENABLE_CORE=0 FUSION_ENABLE_GIT=1 FUSION_ENABLE_TOOLS=1 FUSION_ENABLE_DIFF=1 copilot-fusion
 ```
 
 Base MCP config example is provided in `mcp-config.example.json`.
@@ -59,7 +62,7 @@ Base MCP config example is provided in `mcp-config.example.json`.
 ## Migration Guide (contextwell + gitpilot + toolpilot → copilot-fusion)
 
 1. Install and configure `copilot-fusion` as your primary server.
-2. Disable `contextwell`, `gitpilot`, and `toolpilot` in your MCP client config.
+2. Disable `contextwell`, `gitpilot`, `toolpilot`, and `diffpilot` in your MCP client config.
 3. Keep the same tool names in prompts; the merged server preserves the original surface for the migrated domains.
 4. Validate coverage with `fusion_api_compat` after startup.
 
@@ -70,6 +73,7 @@ Base MCP config example is provided in `mcp-config.example.json`.
 | `contextwell` | Full initial surface | Implemented in `contextwell-core` domain |
 | `gitpilot` | Full initial surface | Implemented in `contextwell-git` domain |
 | `toolpilot` | Full initial surface | Implemented in `contextwell-tools` domain (with `git_log` routed via merged git domain) |
+| `diffpilot` | Full initial surface | Implemented in `contextwell-diff` domain |
 
 ## Optional Tools Strategy
 
@@ -84,6 +88,14 @@ The non-core pilot tools remain standalone and can run beside fusion:
 - `diffpilot`
 
 Use `mcp-config.optional.example.json` as a template when you want fusion + optional tools together.
+
+## Roadmap
+
+The next feature tracks are being planned separately so they can be implemented one at a time:
+
+- text distillation / compaction
+- safe file editing
+- code navigation / symbol awareness
 
 ## Performance Benchmarking
 
@@ -114,4 +126,4 @@ hyperfine --warmup 2 "uv run python scripts/benchmark_fusion.py"
 | `list_tools_ms` | 0.649 |
 | `fusion_health_ms` | 0.536 |
 | `fusion_api_compat_ms` | 0.424 |
-| `tool_count` | 44 |
+| `tool_count` | 50 |
