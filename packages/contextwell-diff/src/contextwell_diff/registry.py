@@ -145,14 +145,14 @@ def register(mcp: FastMCP) -> None:
 
     @mcp.tool
     def summarize_diff(diff_text: str) -> dict[str, object]:
-        """Parse a raw unified diff string and return aggregate counts (files, additions, deletions, hunks)."""
+        """Parse a raw unified diff string and return aggregate counts plus compact per-file summaries."""
         if not diff_text.strip():
             return {"total_files": 0, "total_additions": 0, "total_deletions": 0, "total_hunks": 0, "files": []}
         files = _parse_unified_diff(diff_text)
         summary = _summarize_files(files)
-        # Return summary without full hunk lines to keep the response compact.
+        # Return per-file counts without full hunk objects to keep the response compact.
         compact_files = [
-            {"path": f["path"], "additions": f["additions"], "deletions": f["deletions"], "hunks": len(f["hunks"])}  # type: ignore[arg-type]
+            {"path": f["path"], "additions": f["additions"], "deletions": f["deletions"], "hunk_count": len(f["hunks"])}  # type: ignore[arg-type]
             for f in files
         ]
         return {
