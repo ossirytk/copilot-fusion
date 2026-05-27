@@ -1,5 +1,12 @@
 # Code navigation plan
 
+## Status
+
+- Phase 1 lightweight Python symbol lookup is implemented as `symbol_search`.
+- Broader language coverage and richer index/callgraph behavior remain follow-up work.
+
+---
+
 ## Goal
 
 Add symbol-aware navigation so Copilot can move beyond raw file search and better understand project structure.

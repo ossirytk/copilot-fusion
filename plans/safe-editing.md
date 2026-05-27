@@ -1,5 +1,12 @@
 # Safe editing plan
 
+## Status
+
+- Phase 1 guarded patch editing is implemented as `apply_text_patch`.
+- Further ergonomics (richer patch formats, conflict diagnostics) remain follow-up work.
+
+---
+
 ## Goal
 
 Add a minimal write-capable tool so copilot-fusion can move from inspection-only to actual code assistance.

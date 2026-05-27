@@ -216,3 +216,87 @@ def test_text_compact_from_path_with_filters(tmp_path: Path) -> None:
     assert selected
     assert all("noisy" not in str(item.get("text", "")).lower() for item in selected if isinstance(item, dict))
     assert any("payment" in str(item.get("text", "")).lower() for item in selected if isinstance(item, dict))
+
+
+def test_apply_text_patch_replace_and_insert(tmp_path: Path) -> None:
+    target = tmp_path / "sample.txt"
+    target.write_text("alpha\nbeta\ngamma\n", encoding="utf-8")
+    result = _call(
+        "apply_text_patch",
+        {
+            "path": str(target),
+            "edits": [
+                {"start_line": 2, "end_line": 2, "content": "beta-updated"},
+                {"start_line": 4, "end_line": 3, "content": "delta"},
+            ],
+        },
+    )
+    assert isinstance(result, dict)
+    assert "error" not in result
+    assert result.get("changed") is True
+    assert target.read_text(encoding="utf-8") == "alpha\nbeta-updated\ngamma\ndelta\n"
+
+
+def test_apply_text_patch_guardrails(tmp_path: Path) -> None:
+    missing = _call("apply_text_patch", {"path": str(tmp_path / "missing.txt"), "edits": [{"start_line": 1, "end_line": 0, "content": "x"}]})
+    assert isinstance(missing, dict)
+    assert "error" in missing
+
+    target = tmp_path / "guard.txt"
+    target.write_text("one\ntwo\n", encoding="utf-8")
+    mismatch = _call(
+        "apply_text_patch",
+        {
+            "path": str(target),
+            "edits": [{"start_line": 1, "end_line": 1, "content": "ONE"}],
+            "expected_hash": "bad-hash",
+        },
+    )
+    assert isinstance(mismatch, dict)
+    assert "error" in mismatch
+
+    overlap = _call(
+        "apply_text_patch",
+        {
+            "path": str(target),
+            "edits": [
+                {"start_line": 1, "end_line": 2, "content": "merged"},
+                {"start_line": 2, "end_line": 2, "content": "two"},
+            ],
+        },
+    )
+    assert isinstance(overlap, dict)
+    assert "error" in overlap
+
+
+def test_symbol_search_python_symbols(tmp_path: Path) -> None:
+    target = tmp_path / "module.py"
+    target.write_text(
+        "\n".join(
+            [
+                "VALUE = 1",
+                "",
+                "class Runner:",
+                "    pass",
+                "",
+                "def run_task(arg: str) -> str:",
+                "    return arg",
+            ]
+        ),
+        encoding="utf-8",
+    )
+    result = _call("symbol_search", {"paths": [str(tmp_path)], "query": "run"})
+    assert isinstance(result, dict)
+    assert result.get("truncated") is False
+    items = result.get("results", [])
+    assert isinstance(items, list)
+    assert any(item.get("symbol") == "Runner" for item in items if isinstance(item, dict))
+    assert any(item.get("symbol") == "run_task" for item in items if isinstance(item, dict))
+
+
+def test_symbol_search_invalid_kind(tmp_path: Path) -> None:
+    target = tmp_path / "module.py"
+    target.write_text("def ok():\n    return 1\n", encoding="utf-8")
+    result = _call("symbol_search", {"paths": [str(target)], "kinds": ["method"]})
+    assert isinstance(result, dict)
+    assert "error" in result

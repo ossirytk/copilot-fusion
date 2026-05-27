@@ -31,6 +31,9 @@ _URL_RE = re.compile(r"https?://[^\s]+", re.IGNORECASE)
 _PATH_RE = re.compile(r"(/[\w.\-]+(?:/[\w.\-]+)+)")
 _TS_RE = re.compile(r"\b\d{4}-\d{2}-\d{2}[T ][0-2]\d:[0-5]\d:[0-5]\d(?:\.\d+)?(?:Z|[+-]\d{2}:\d{2})?\b")
 _CLASSLIKE_RE = re.compile(r"\b([A-Z][A-Za-z0-9_]*(?:Error|Exception|Warning))\b")
+_PY_FUNCTION_RE = re.compile(r"^\s*def\s+([A-Za-z_]\w*)\s*\(")
+_PY_CLASS_RE = re.compile(r"^\s*class\s+([A-Za-z_]\w*)\b")
+_PY_VARIABLE_RE = re.compile(r"^([A-Za-z_]\w*)\s*=\s*.+")
 
 
 def _project(node: Any, field: str) -> Any:
@@ -59,6 +62,10 @@ def _compile_patterns(patterns: list[str] | None) -> tuple[list[re.Pattern[str]]
         except re.error as exc:
             return [], f"Invalid regex pattern: {pattern!r} ({exc})"
     return compiled, None
+
+
+def _sha256_text(text: str) -> str:
+    return hashlib.sha256(text.encode("utf-8")).hexdigest()
 
 
 def register(mcp: FastMCP) -> None:
@@ -257,6 +264,174 @@ def register(mcp: FastMCP) -> None:
             "backend": "deterministic",
             "selected": selected,
         }
+
+    @mcp.tool
+    def apply_text_patch(
+        path: str,
+        edits: list[dict[str, object]],
+        dry_run: bool = False,
+        create: bool = False,
+        expected_hash: str = "",
+    ) -> dict[str, object]:
+        _REQUESTS["apply_text_patch"] += 1
+        if not edits:
+            return {"error": "edits must contain at least one edit item."}
+
+        resolved = resolve_path(path)
+        exists = resolved.exists()
+        if exists and resolved.is_dir():
+            return {"error": "Path points to a directory, expected a file."}
+        if not exists and not create:
+            return {"error": "Target file does not exist. Set create=true to create it."}
+
+        original_text = ""
+        if exists:
+            try:
+                original_text = resolved.read_text(encoding="utf-8")
+            except (OSError, UnicodeDecodeError) as exc:
+                return {"error": f"Failed to read file: {exc}"}
+        before_hash = _sha256_text(original_text)
+        if expected_hash and expected_hash != before_hash:
+            return {"error": "expected_hash does not match current file content.", "before_hash": before_hash}
+
+        lines = original_text.splitlines()
+        has_trailing_newline = original_text.endswith("\n")
+        parsed_edits: list[dict[str, object]] = []
+
+        for idx, edit in enumerate(edits, start=1):
+            if "start_line" not in edit or "end_line" not in edit or "content" not in edit:
+                return {"error": f"Edit #{idx} must include start_line, end_line, and content."}
+            try:
+                start_line = int(edit["start_line"])
+                end_line = int(edit["end_line"])
+            except (TypeError, ValueError):
+                return {"error": f"Edit #{idx} start_line/end_line must be integers."}
+            content = str(edit["content"])
+            if start_line < 1:
+                return {"error": f"Edit #{idx} start_line must be >= 1."}
+            if end_line < start_line - 1:
+                return {"error": f"Edit #{idx} end_line must be >= start_line - 1."}
+            if start_line > len(lines) + 1:
+                return {"error": f"Edit #{idx} start_line is out of range for current file length {len(lines)}."}
+            if end_line > len(lines):
+                return {"error": f"Edit #{idx} end_line is out of range for current file length {len(lines)}."}
+            parsed_edits.append(
+                {
+                    "start_line": start_line,
+                    "end_line": end_line,
+                    "replacement": content.splitlines(),
+                }
+            )
+
+        # Validate non-overlap against original line coordinates.
+        ordered = sorted(parsed_edits, key=lambda item: (int(item["start_line"]), int(item["end_line"])))
+        last_consumed = 0
+        for edit in ordered:
+            start_line = int(edit["start_line"])
+            end_line = int(edit["end_line"])
+            if start_line <= last_consumed:
+                return {"error": "Edits overlap; each edit must target a distinct line range."}
+            last_consumed = max(last_consumed, end_line)
+
+        updated_lines = list(lines)
+        for edit in sorted(ordered, key=lambda item: int(item["start_line"]), reverse=True):
+            start_idx = int(edit["start_line"]) - 1
+            end_line = int(edit["end_line"])
+            replacement = list(edit["replacement"])
+            if end_line < int(edit["start_line"]):
+                updated_lines[start_idx:start_idx] = replacement
+                continue
+            updated_lines[start_idx:end_line] = replacement
+
+        if updated_lines:
+            result_text = "\n".join(updated_lines) + ("\n" if has_trailing_newline else "")
+        else:
+            result_text = ""
+        after_hash = _sha256_text(result_text)
+        changed = after_hash != before_hash
+
+        if not dry_run and changed:
+            resolved.parent.mkdir(parents=True, exist_ok=True)
+            resolved.write_text(result_text, encoding="utf-8")
+
+        return {
+            "path": str(resolved),
+            "applied": len(parsed_edits),
+            "changed": changed,
+            "dry_run": dry_run,
+            "before_hash": before_hash,
+            "after_hash": after_hash,
+            "line_count_before": len(lines),
+            "line_count_after": len(updated_lines),
+        }
+
+    @mcp.tool
+    def symbol_search(
+        paths: list[str],
+        query: str = "",
+        kinds: list[str] | None = None,
+        max_results: int = 500,
+    ) -> dict[str, object]:
+        _REQUESTS["symbol_search"] += 1
+        if not paths:
+            return {"error": "paths must contain at least one file or directory."}
+
+        allowed_kinds = {"function", "class", "variable"}
+        selected_kinds = set(kinds or ["function", "class", "variable"])
+        invalid_kinds = selected_kinds - allowed_kinds
+        if invalid_kinds:
+            return {"error": f"Invalid kinds: {sorted(invalid_kinds)}. Allowed kinds: {sorted(allowed_kinds)}"}
+
+        candidates: list[Path] = []
+        for source in paths:
+            resolved = resolve_path(source)
+            if resolved.is_dir():
+                candidates.extend([p for p in resolved.rglob("*.py") if p.is_file()])
+            elif resolved.is_file() and resolved.suffix.lower() == ".py":
+                candidates.append(resolved)
+
+        q = query.lower().strip()
+        results: list[dict[str, object]] = []
+
+        for candidate in candidates:
+            try:
+                file_lines = candidate.read_text(encoding="utf-8").splitlines()
+            except (OSError, UnicodeDecodeError):
+                continue
+            for line_no, line in enumerate(file_lines, start=1):
+                symbol_kind = ""
+                symbol_name = ""
+                if "function" in selected_kinds:
+                    match = _PY_FUNCTION_RE.match(line)
+                    if match:
+                        symbol_kind = "function"
+                        symbol_name = match.group(1)
+                if not symbol_kind and "class" in selected_kinds:
+                    match = _PY_CLASS_RE.match(line)
+                    if match:
+                        symbol_kind = "class"
+                        symbol_name = match.group(1)
+                if not symbol_kind and "variable" in selected_kinds:
+                    match = _PY_VARIABLE_RE.match(line)
+                    if match:
+                        symbol_kind = "variable"
+                        symbol_name = match.group(1)
+                if not symbol_kind:
+                    continue
+                if q and q not in symbol_name.lower():
+                    continue
+                results.append(
+                    {
+                        "path": str(candidate),
+                        "line": line_no,
+                        "symbol": symbol_name,
+                        "kind": symbol_kind,
+                        "signature": line.strip(),
+                    }
+                )
+                if len(results) >= max(1, max_results):
+                    return {"results": results, "truncated": True}
+        return {"results": results, "truncated": False}
 
     @mcp.tool
     def read_file(
