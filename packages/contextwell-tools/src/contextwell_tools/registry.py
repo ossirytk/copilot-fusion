@@ -31,6 +31,7 @@ _URL_RE = re.compile(r"https?://[^\s]+", re.IGNORECASE)
 _PATH_RE = re.compile(r"(/[\w.\-]+(?:/[\w.\-]+)+)")
 _TS_RE = re.compile(r"\b\d{4}-\d{2}-\d{2}[T ][0-2]\d:[0-5]\d:[0-5]\d(?:\.\d+)?(?:Z|[+-]\d{2}:\d{2})?\b")
 _CLASSLIKE_RE = re.compile(r"\b([A-Z][A-Za-z0-9_]*(?:Error|Exception|Warning))\b")
+_SENTENCE_SPLIT_RE = re.compile(r"(?<=[.!?])\s+")
 _PY_FUNCTION_RE = re.compile(r"^\s*def\s+([A-Za-z_]\w*)\s*\(")
 _PY_CLASS_RE = re.compile(r"^\s*class\s+([A-Za-z_]\w*)\b")
 _PY_VARIABLE_RE = re.compile(r"^([A-Za-z_]\w*)\s*=\s*.+")
@@ -66,6 +67,38 @@ def _compile_patterns(patterns: list[str] | None) -> tuple[list[re.Pattern[str]]
 
 def _sha256_text(text: str) -> str:
     return hashlib.sha256(text.encode("utf-8")).hexdigest()
+
+
+def _extractive_summary(text: str, max_sentences: int) -> tuple[str, list[str], dict[str, object]]:
+    normalized = re.sub(r"\s+", " ", text).strip()
+    if not normalized:
+        return "", [], {"total_sentences": 0, "selected_sentences": 0, "truncated": False}
+
+    sentences = [segment.strip() for segment in _SENTENCE_SPLIT_RE.split(normalized) if segment.strip()]
+    if not sentences:
+        return "", [], {"total_sentences": 0, "selected_sentences": 0, "truncated": False}
+
+    token_freq = Counter(re.findall(r"[A-Za-z_]{4,}", normalized.lower()))
+    scored: list[tuple[float, int, str]] = []
+    for idx, sentence in enumerate(sentences):
+        tokens = re.findall(r"[A-Za-z_]{4,}", sentence.lower())
+        score = float(sum(token_freq[token] for token in tokens))
+        if _DEFAULT_SIGNAL_RE.search(sentence):
+            score += 8.0
+        if _STACK_RE.search(sentence):
+            score += 4.0
+        scored.append((score, idx, sentence))
+
+    limit = max(1, min(max_sentences, 12))
+    chosen = sorted(scored, key=lambda item: item[0], reverse=True)[:limit]
+    ordered = [item[2] for item in sorted(chosen, key=lambda item: item[1])]
+    summary = " ".join(ordered)
+    stats = {
+        "total_sentences": len(sentences),
+        "selected_sentences": len(ordered),
+        "truncated": len(sentences) > len(ordered),
+    }
+    return summary, ordered, stats
 
 
 def register(mcp: FastMCP) -> None:
@@ -263,6 +296,39 @@ def register(mcp: FastMCP) -> None:
             },
             "backend": "deterministic",
             "selected": selected,
+        }
+
+    @mcp.tool
+    def text_summarize(
+        text: str = "",
+        path: str = "",
+        max_sentences: int = 3,
+        backend: str = "auto",
+    ) -> dict[str, object]:
+        _REQUESTS["text_summarize"] += 1
+        if not text and not path:
+            return {"error": "Either text or path must be provided."}
+        if backend not in {"auto", "extractive"}:
+            return {"error": f"Unsupported backend: {backend}"}
+
+        source_text = text
+        if path:
+            try:
+                source_text = resolve_path(path).read_text(encoding="utf-8")
+            except (OSError, UnicodeDecodeError) as exc:
+                return {"error": f"Failed to read file: {exc}"}
+
+        summary, bullets, summary_stats = _extractive_summary(source_text, max_sentences=max_sentences)
+        chosen_backend = "local-extractive"
+        return {
+            "summary": summary,
+            "bullets": bullets,
+            "backend": chosen_backend,
+            "stats": {
+                "input_chars": len(source_text),
+                "input_lines": len(source_text.splitlines()),
+                **summary_stats,
+            },
         }
 
     @mcp.tool

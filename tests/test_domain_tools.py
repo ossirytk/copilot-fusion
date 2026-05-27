@@ -232,6 +232,39 @@ def test_text_compact_invalid_inputs() -> None:
     assert "error" in bad_pattern
 
 
+def test_text_summarize_from_text_and_path(tmp_path: Path) -> None:
+    text = (
+        "Service started successfully. "
+        "The API returned TimeoutError while calling upstream service. "
+        "Retry succeeded on second attempt. "
+        "Final status is healthy."
+    )
+    from_text = _call("text_summarize", {"text": text, "max_sentences": 2})
+    assert isinstance(from_text, dict)
+    assert from_text.get("backend") == "local-extractive"
+    assert "TimeoutError" in str(from_text.get("summary", ""))
+    stats = from_text.get("stats", {})
+    assert isinstance(stats, dict)
+    assert stats.get("selected_sentences") == 2
+
+    source = tmp_path / "notes.txt"
+    source.write_text(text, encoding="utf-8")
+    from_path = _call("text_summarize", {"path": str(source), "backend": "extractive"})
+    assert isinstance(from_path, dict)
+    assert "summary" in from_path
+    assert "error" not in from_path
+
+
+def test_text_summarize_invalid_inputs() -> None:
+    empty = _call("text_summarize", {})
+    assert isinstance(empty, dict)
+    assert "error" in empty
+
+    invalid = _call("text_summarize", {"text": "hello", "backend": "remote"})
+    assert isinstance(invalid, dict)
+    assert "error" in invalid
+
+
 def test_apply_text_patch_replace_and_insert(tmp_path: Path) -> None:
     target = tmp_path / "sample.txt"
     target.write_text("alpha\nbeta\ngamma\n", encoding="utf-8")

@@ -39,7 +39,7 @@ Initial migration is active:
 
 - `contextwell-core` exports memory tools (`remember`, `recall`, `list_memories`, etc.)
 - `contextwell-git` exports git and gh tools (`git_*`, `gh_*`)
-- `contextwell-tools` exports filesystem/code tools (`fs_glob`, `fs_tree`, `text_search`, `text_compact`, `apply_text_patch`, `symbol_search`, `read_file`, `json_select`, `yaml_select`, `file_hash`, `server_stats`)
+- `contextwell-tools` exports filesystem/code tools (`fs_glob`, `fs_tree`, `text_search`, `text_compact`, `text_summarize`, `apply_text_patch`, `symbol_search`, `read_file`, `json_select`, `yaml_select`, `file_hash`, `server_stats`)
 - `contextwell-diff` exports structured diff tools (`diff_staged`, `diff_refs`, `diff_files`, `summarize_diff`)
 
 ## Configuration
@@ -93,7 +93,7 @@ Use `mcp-config.optional.example.json` as a template when you want fusion + opti
 
 The next feature tracks are being implemented one at a time:
 
-- text distillation / compaction (phase 1 deterministic `text_compact` is implemented)
+- text distillation / compaction (phase 1 `text_compact` + phase 2 local extractive `text_summarize` are implemented)
 - safe file editing (phase 1 guarded `apply_text_patch` is implemented)
 - code navigation / symbol awareness (phase 1 lightweight Python `symbol_search` is implemented)
 
@@ -124,8 +124,8 @@ hyperfine --warmup 2 "uv run python scripts/benchmark_fusion.py"
 
 | Metric | Mean |
 |---|---:|
-| `create_server_ms` | 62.164 |
-| `list_tools_ms` | 0.669 |
-| `fusion_health_ms` | 0.584 |
-| `fusion_api_compat_ms` | 0.580 |
-| `tool_count` | 53 |
+| `create_server_ms` | 64.423 |
+| `list_tools_ms` | 0.856 |
+| `fusion_health_ms` | 0.625 |
+| `fusion_api_compat_ms` | 0.564 |
+| `tool_count` | 54 |

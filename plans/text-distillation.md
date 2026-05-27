@@ -3,7 +3,8 @@
 ## Status
 
 - Phase 1 deterministic baseline is implemented as `text_compact`.
-- Phase 2 (optional summarization backend) remains planned.
+- Phase 2 local extractive summarization backend is implemented as `text_summarize`.
+- Optional remote/model-backed summarization remains follow-up work.
 
 ---
 
