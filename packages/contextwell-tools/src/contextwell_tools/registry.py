@@ -35,6 +35,10 @@ _SENTENCE_SPLIT_RE = re.compile(r"(?<=[.!?])\s+")
 _PY_FUNCTION_RE = re.compile(r"^\s*def\s+([A-Za-z_]\w*)\s*\(")
 _PY_CLASS_RE = re.compile(r"^\s*class\s+([A-Za-z_]\w*)\b")
 _PY_VARIABLE_RE = re.compile(r"^([A-Za-z_]\w*)\s*=\s*.+")
+_JS_FUNCTION_RE = re.compile(r"^\s*(?:export\s+)?(?:async\s+)?function\s+([A-Za-z_$]\w*)\s*\(")
+_JS_CLASS_RE = re.compile(r"^\s*(?:export\s+)?class\s+([A-Za-z_$]\w*)\b")
+_JS_VARIABLE_RE = re.compile(r"^\s*(?:export\s+)?(?:const|let|var)\s+([A-Za-z_$]\w*)\s*=")
+_JS_ARROW_FN_RE = re.compile(r"^\s*(?:export\s+)?(?:const|let|var)\s+([A-Za-z_$]\w*)\s*=\s*(?:async\s*)?\(?.*\)?\s*=>")
 
 
 def _project(node: Any, field: str) -> Any:
@@ -99,6 +103,37 @@ def _extractive_summary(text: str, max_sentences: int) -> tuple[str, list[str], 
         "truncated": len(sentences) > len(ordered),
     }
     return summary, ordered, stats
+
+
+def _match_symbol_from_line(line: str, language: str, selected_kinds: set[str]) -> tuple[str, str]:
+    if language == "python":
+        if "function" in selected_kinds:
+            match = _PY_FUNCTION_RE.match(line)
+            if match:
+                return "function", match.group(1)
+        if "class" in selected_kinds:
+            match = _PY_CLASS_RE.match(line)
+            if match:
+                return "class", match.group(1)
+        if "variable" in selected_kinds:
+            match = _PY_VARIABLE_RE.match(line)
+            if match:
+                return "variable", match.group(1)
+        return "", ""
+
+    if "function" in selected_kinds:
+        match = _JS_FUNCTION_RE.match(line) or _JS_ARROW_FN_RE.match(line)
+        if match:
+            return "function", match.group(1)
+    if "class" in selected_kinds:
+        match = _JS_CLASS_RE.match(line)
+        if match:
+            return "class", match.group(1)
+    if "variable" in selected_kinds:
+        match = _JS_VARIABLE_RE.match(line)
+        if match:
+            return "variable", match.group(1)
+    return "", ""
 
 
 def register(mcp: FastMCP) -> None:
@@ -363,16 +398,32 @@ def register(mcp: FastMCP) -> None:
         lines = original_text.splitlines()
         has_trailing_newline = original_text.endswith("\n")
         parsed_edits: list[dict[str, object]] = []
+        allowed_ops = {"replace", "delete", "insert_before", "insert_after"}
 
         for idx, edit in enumerate(edits, start=1):
-            if "start_line" not in edit or "end_line" not in edit or "content" not in edit:
-                return {"error": f"Edit #{idx} must include start_line, end_line, and content."}
+            op = str(edit.get("op", "replace"))
+            if op not in allowed_ops:
+                return {"error": f"Edit #{idx} has invalid op {op!r}. Allowed ops: {sorted(allowed_ops)}."}
             try:
-                start_line = int(edit["start_line"])
-                end_line = int(edit["end_line"])
+                anchor_line = int(edit.get("line", edit.get("start_line", 0)))
             except (TypeError, ValueError):
-                return {"error": f"Edit #{idx} start_line/end_line must be integers."}
-            content = str(edit["content"])
+                return {"error": f"Edit #{idx} line/start_line must be an integer."}
+
+            if op in {"replace", "delete"}:
+                if "start_line" not in edit or "end_line" not in edit:
+                    return {"error": f"Edit #{idx} must include start_line and end_line for op={op}."}
+                try:
+                    start_line = int(edit["start_line"])
+                    end_line = int(edit["end_line"])
+                except (TypeError, ValueError):
+                    return {"error": f"Edit #{idx} start_line/end_line must be integers."}
+            elif op == "insert_before":
+                start_line = anchor_line
+                end_line = anchor_line - 1
+            else:  # insert_after
+                start_line = anchor_line + 1
+                end_line = anchor_line
+
             if start_line < 1:
                 return {"error": f"Edit #{idx} start_line must be >= 1."}
             if end_line < start_line - 1:
@@ -381,26 +432,73 @@ def register(mcp: FastMCP) -> None:
                 return {"error": f"Edit #{idx} start_line is out of range for current file length {len(lines)}."}
             if end_line > len(lines):
                 return {"error": f"Edit #{idx} end_line is out of range for current file length {len(lines)}."}
+
+            if op == "delete":
+                replacement: list[str] = []
+            else:
+                if "content" not in edit:
+                    return {"error": f"Edit #{idx} must include content for op={op}."}
+                replacement = str(edit["content"]).splitlines()
             parsed_edits.append(
                 {
+                    "index": idx,
+                    "op": op,
                     "start_line": start_line,
                     "end_line": end_line,
-                    "replacement": content.splitlines(),
+                    "replacement": replacement,
                 }
             )
 
-        # Validate non-overlap against original line coordinates.
-        ordered = sorted(parsed_edits, key=lambda item: (int(item["start_line"]), int(item["end_line"])))
-        last_consumed = 0
-        for edit in ordered:
+        # Validate conflicts against original coordinates.
+        consumed_ranges: list[tuple[int, int, int]] = []
+        insertion_anchors: list[tuple[int, int]] = []
+        for edit in parsed_edits:
             start_line = int(edit["start_line"])
             end_line = int(edit["end_line"])
-            if start_line <= last_consumed:
-                return {"error": "Edits overlap; each edit must target a distinct line range."}
-            last_consumed = max(last_consumed, end_line)
+            idx = int(edit["index"])
+            if end_line >= start_line:
+                consumed_ranges.append((start_line, end_line, idx))
+            else:
+                insertion_anchors.append((start_line, idx))
+
+        for i, (start_a, end_a, idx_a) in enumerate(consumed_ranges):
+            for start_b, end_b, idx_b in consumed_ranges[i + 1 :]:
+                if start_a <= end_b and start_b <= end_a:
+                    return {
+                        "error": "Edits overlap; each edit must target a distinct line range.",
+                        "details": {
+                            "type": "overlap",
+                            "edit_a": {"index": idx_a, "start_line": start_a, "end_line": end_a},
+                            "edit_b": {"index": idx_b, "start_line": start_b, "end_line": end_b},
+                        },
+                    }
+
+        for i, (anchor_a, idx_a) in enumerate(insertion_anchors):
+            for anchor_b, idx_b in insertion_anchors[i + 1 :]:
+                if anchor_a == anchor_b:
+                    return {
+                        "error": "Insertion edits conflict at the same anchor.",
+                        "details": {
+                            "type": "insertion-anchor-conflict",
+                            "edit_a": {"index": idx_a, "anchor_line": anchor_a},
+                            "edit_b": {"index": idx_b, "anchor_line": anchor_b},
+                        },
+                    }
+
+        for anchor, idx_anchor in insertion_anchors:
+            for start_line, end_line, idx_consume in consumed_ranges:
+                if start_line <= anchor <= end_line + 1:
+                    return {
+                        "error": "Insertion conflicts with a replace/delete range.",
+                        "details": {
+                            "type": "insert-range-conflict",
+                            "insert_edit": {"index": idx_anchor, "anchor_line": anchor},
+                            "range_edit": {"index": idx_consume, "start_line": start_line, "end_line": end_line},
+                        },
+                    }
 
         updated_lines = list(lines)
-        for edit in sorted(ordered, key=lambda item: int(item["start_line"]), reverse=True):
+        for edit in sorted(parsed_edits, key=lambda item: int(item["start_line"]), reverse=True):
             start_idx = int(edit["start_line"]) - 1
             end_line = int(edit["end_line"])
             replacement = list(edit["replacement"])
@@ -429,6 +527,16 @@ def register(mcp: FastMCP) -> None:
             "after_hash": after_hash,
             "line_count_before": len(lines),
             "line_count_after": len(updated_lines),
+            "normalized_edits": [
+                {
+                    "index": int(edit["index"]),
+                    "op": str(edit["op"]),
+                    "start_line": int(edit["start_line"]),
+                    "end_line": int(edit["end_line"]),
+                    "replacement_lines": len(list(edit["replacement"])),
+                }
+                for edit in parsed_edits
+            ],
         }
 
     @mcp.tool
@@ -448,40 +556,31 @@ def register(mcp: FastMCP) -> None:
         if invalid_kinds:
             return {"error": f"Invalid kinds: {sorted(invalid_kinds)}. Allowed kinds: {sorted(allowed_kinds)}"}
 
-        candidates: list[Path] = []
+        candidates: list[tuple[Path, str]] = []
         for source in paths:
             resolved = resolve_path(source)
             if resolved.is_dir():
-                candidates.extend([p for p in resolved.rglob("*.py") if p.is_file()])
-            elif resolved.is_file() and resolved.suffix.lower() == ".py":
-                candidates.append(resolved)
+                for suffix, language in (("*.py", "python"), ("*.js", "javascript"), ("*.ts", "typescript")):
+                    candidates.extend([(p, language) for p in resolved.rglob(suffix) if p.is_file()])
+            elif resolved.is_file():
+                suffix = resolved.suffix.lower()
+                if suffix == ".py":
+                    candidates.append((resolved, "python"))
+                elif suffix == ".js":
+                    candidates.append((resolved, "javascript"))
+                elif suffix == ".ts":
+                    candidates.append((resolved, "typescript"))
 
         q = query.lower().strip()
         results: list[dict[str, object]] = []
 
-        for candidate in candidates:
+        for candidate, language in candidates:
             try:
                 file_lines = candidate.read_text(encoding="utf-8").splitlines()
             except (OSError, UnicodeDecodeError):
                 continue
             for line_no, line in enumerate(file_lines, start=1):
-                symbol_kind = ""
-                symbol_name = ""
-                if "function" in selected_kinds:
-                    match = _PY_FUNCTION_RE.match(line)
-                    if match:
-                        symbol_kind = "function"
-                        symbol_name = match.group(1)
-                if not symbol_kind and "class" in selected_kinds:
-                    match = _PY_CLASS_RE.match(line)
-                    if match:
-                        symbol_kind = "class"
-                        symbol_name = match.group(1)
-                if not symbol_kind and "variable" in selected_kinds:
-                    match = _PY_VARIABLE_RE.match(line)
-                    if match:
-                        symbol_kind = "variable"
-                        symbol_name = match.group(1)
+                symbol_kind, symbol_name = _match_symbol_from_line(line, language=language, selected_kinds=selected_kinds)
                 if not symbol_kind:
                     continue
                 if q and q not in symbol_name.lower():
@@ -492,6 +591,7 @@ def register(mcp: FastMCP) -> None:
                         "line": line_no,
                         "symbol": symbol_name,
                         "kind": symbol_kind,
+                        "language": language,
                         "signature": line.strip(),
                     }
                 )

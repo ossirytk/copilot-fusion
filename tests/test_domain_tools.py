@@ -347,6 +347,49 @@ def test_apply_text_patch_dry_run_and_create(tmp_path: Path) -> None:
     assert created.read_text(encoding="utf-8") == "first line"
 
 
+def test_apply_text_patch_operation_modes(tmp_path: Path) -> None:
+    target = tmp_path / "ops.txt"
+    target.write_text("one\ntwo\nthree\n", encoding="utf-8")
+    result = _call(
+        "apply_text_patch",
+        {
+            "path": str(target),
+            "edits": [
+                {"op": "insert_before", "line": 1, "content": "zero"},
+                {"op": "delete", "start_line": 2, "end_line": 2},
+                {"op": "insert_after", "line": 3, "content": "three-and-half"},
+            ],
+        },
+    )
+    assert isinstance(result, dict)
+    assert "error" not in result
+    normalized = result.get("normalized_edits", [])
+    assert isinstance(normalized, list)
+    assert any(item.get("op") == "insert_before" for item in normalized if isinstance(item, dict))
+    assert any(item.get("op") == "delete" for item in normalized if isinstance(item, dict))
+    assert target.read_text(encoding="utf-8") == "zero\none\nthree\nthree-and-half\n"
+
+
+def test_apply_text_patch_conflict_details(tmp_path: Path) -> None:
+    target = tmp_path / "conflict.txt"
+    target.write_text("a\nb\nc\n", encoding="utf-8")
+    result = _call(
+        "apply_text_patch",
+        {
+            "path": str(target),
+            "edits": [
+                {"op": "replace", "start_line": 1, "end_line": 2, "content": "ab"},
+                {"op": "insert_before", "line": 2, "content": "x"},
+            ],
+        },
+    )
+    assert isinstance(result, dict)
+    assert "error" in result
+    details = result.get("details", {})
+    assert isinstance(details, dict)
+    assert details.get("type") == "insert-range-conflict"
+
+
 def test_symbol_search_python_symbols(tmp_path: Path) -> None:
     target = tmp_path / "module.py"
     target.write_text(
@@ -399,3 +442,35 @@ def test_symbol_search_truncation(tmp_path: Path) -> None:
     assert isinstance(result, dict)
     assert result.get("truncated") is True
     assert len(result.get("results", [])) == 2
+
+
+def test_symbol_search_javascript_and_typescript(tmp_path: Path) -> None:
+    js_file = tmp_path / "mod.js"
+    js_file.write_text(
+        "\n".join(
+            [
+                "export function buildClient() { return {}; }",
+                "export class Worker {}",
+                "const timeoutMs = 1000",
+            ]
+        ),
+        encoding="utf-8",
+    )
+    ts_file = tmp_path / "mod.ts"
+    ts_file.write_text(
+        "\n".join(
+            [
+                "export const runTask = async () => true;",
+                "class TaskRunner {}",
+            ]
+        ),
+        encoding="utf-8",
+    )
+
+    result = _call("symbol_search", {"paths": [str(tmp_path)], "query": "task"})
+    assert isinstance(result, dict)
+    assert "error" not in result
+    rows = result.get("results", [])
+    assert isinstance(rows, list)
+    assert any(item.get("symbol") == "runTask" for item in rows if isinstance(item, dict))
+    assert any(item.get("language") == "typescript" for item in rows if isinstance(item, dict))
