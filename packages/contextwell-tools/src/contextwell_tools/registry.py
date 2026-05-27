@@ -373,12 +373,26 @@ def register(mcp: FastMCP) -> None:
         dry_run: bool = False,
         create: bool = False,
         expected_hash: str = "",
+        workspace_root: str = "",
     ) -> dict[str, object]:
         _REQUESTS["apply_text_patch"] += 1
         if not edits:
             return {"error": "edits must contain at least one edit item."}
 
         resolved = resolve_path(path)
+        if workspace_root:
+            root = resolve_path(workspace_root)
+            try:
+                resolved.relative_to(root)
+            except ValueError:
+                return {
+                    "error": "Target path is outside configured workspace_root.",
+                    "details": {
+                        "type": "path-outside-root",
+                        "path": str(resolved),
+                        "workspace_root": str(root),
+                    },
+                }
         exists = resolved.exists()
         if exists and resolved.is_dir():
             return {"error": "Path points to a directory, expected a file."}
@@ -527,6 +541,7 @@ def register(mcp: FastMCP) -> None:
             "after_hash": after_hash,
             "line_count_before": len(lines),
             "line_count_after": len(updated_lines),
+            "workspace_root": workspace_root,
             "normalized_edits": [
                 {
                     "index": int(edit["index"]),

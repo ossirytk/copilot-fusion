@@ -390,6 +390,41 @@ def test_apply_text_patch_conflict_details(tmp_path: Path) -> None:
     assert details.get("type") == "insert-range-conflict"
 
 
+def test_apply_text_patch_workspace_root_policy(tmp_path: Path) -> None:
+    root = tmp_path / "workspace"
+    root.mkdir()
+    target = root / "allowed.txt"
+    target.write_text("a\nb\n", encoding="utf-8")
+
+    allowed = _call(
+        "apply_text_patch",
+        {
+            "path": str(target),
+            "workspace_root": str(root),
+            "edits": [{"start_line": 2, "end_line": 2, "content": "B"}],
+        },
+    )
+    assert isinstance(allowed, dict)
+    assert "error" not in allowed
+    assert allowed.get("workspace_root") == str(root)
+
+    outside = tmp_path / "outside.txt"
+    outside.write_text("x\ny\n", encoding="utf-8")
+    denied = _call(
+        "apply_text_patch",
+        {
+            "path": str(outside),
+            "workspace_root": str(root),
+            "edits": [{"start_line": 1, "end_line": 1, "content": "X"}],
+        },
+    )
+    assert isinstance(denied, dict)
+    assert "error" in denied
+    details = denied.get("details", {})
+    assert isinstance(details, dict)
+    assert details.get("type") == "path-outside-root"
+
+
 def test_symbol_search_python_symbols(tmp_path: Path) -> None:
     target = tmp_path / "module.py"
     target.write_text(
