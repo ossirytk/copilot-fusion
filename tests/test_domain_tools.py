@@ -583,3 +583,67 @@ def test_symbol_search_callsites(tmp_path: Path) -> None:
     items = refs.get("items", [])
     assert isinstance(items, list)
     assert any(item.get("match_type") == "callsite" for item in items if isinstance(item, dict))
+
+
+def test_symbol_search_callgraph(tmp_path: Path) -> None:
+    py_file = tmp_path / "graph.py"
+    py_file.write_text(
+        "\n".join(
+            [
+                "def helper():",
+                "    return 1",
+                "",
+                "def run():",
+                "    return helper()",
+                "",
+                "value = helper()",
+            ]
+        ),
+        encoding="utf-8",
+    )
+    js_file = tmp_path / "graph.js"
+    js_file.write_text(
+        "\n".join(
+            [
+                "function api() { return 1; }",
+                "function main() { return api(); }",
+                "const top = api();",
+            ]
+        ),
+        encoding="utf-8",
+    )
+    py_result = _call(
+        "symbol_search",
+        {
+            "paths": [str(tmp_path)],
+            "query": "helper",
+            "kinds": ["function"],
+            "include_callgraph": True,
+        },
+    )
+    assert isinstance(py_result, dict)
+    py_rows = py_result.get("results", [])
+    assert isinstance(py_rows, list)
+    py_target = next((row for row in py_rows if isinstance(row, dict) and row.get("symbol") == "helper"), None)
+    assert isinstance(py_target, dict)
+    py_graph = py_target.get("callgraph", {})
+    assert isinstance(py_graph, dict)
+    assert "run" in py_graph.get("callers", [])
+
+    js_result = _call(
+        "symbol_search",
+        {
+            "paths": [str(tmp_path)],
+            "query": "api",
+            "kinds": ["function"],
+            "include_callgraph": True,
+        },
+    )
+    assert isinstance(js_result, dict)
+    js_rows = js_result.get("results", [])
+    assert isinstance(js_rows, list)
+    js_target = next((row for row in js_rows if isinstance(row, dict) and row.get("symbol") == "api"), None)
+    assert isinstance(js_target, dict)
+    js_graph = js_target.get("callgraph", {})
+    assert isinstance(js_graph, dict)
+    assert "main" in js_graph.get("callers", [])

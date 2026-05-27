@@ -184,6 +184,80 @@ def _collect_references(
     return references
 
 
+def _owner_map_for_file(file_lines: list[str], language: str) -> dict[int, str]:
+    owners: dict[int, str] = {}
+    if language == "python":
+        stack: list[tuple[int, str]] = []
+        for line_no, line in enumerate(file_lines, start=1):
+            stripped = line.strip()
+            indent = len(line) - len(line.lstrip(" "))
+            while stack and indent <= stack[-1][0] and stripped:
+                stack.pop()
+            match = _PY_FUNCTION_RE.match(line)
+            if match:
+                stack.append((indent, match.group(1)))
+            owners[line_no] = stack[-1][1] if stack else "<module>"
+        return owners
+
+    # javascript/typescript: lightweight brace-based ownership
+    stack_js: list[tuple[int, str]] = []
+    brace_depth = 0
+    for line_no, line in enumerate(file_lines, start=1):
+        stripped = line.strip()
+        while stack_js and brace_depth <= stack_js[-1][0]:
+            stack_js.pop()
+        match = _JS_FUNCTION_RE.match(line) or _JS_ARROW_FN_RE.match(line)
+        if match:
+            stack_js.append((brace_depth, match.group(1)))
+        owners[line_no] = stack_js[-1][1] if stack_js else "<module>"
+        open_count = stripped.count("{")
+        close_count = stripped.count("}")
+        brace_depth = max(0, brace_depth + open_count - close_count)
+    return owners
+
+
+def _collect_callgraph(
+    files: list[tuple[Path, str]],
+    symbol: str,
+    symbol_kind: str,
+    declaration_path: str,
+    declaration_line: int,
+    max_items: int,
+) -> dict[str, object]:
+    if symbol_kind != "function":
+        return {"callers": [], "sites": [], "truncated": False}
+
+    call_pattern = re.compile(rf"\b{re.escape(symbol)}\s*\(")
+    callers: set[str] = set()
+    sites: list[dict[str, object]] = []
+
+    for candidate, language in files:
+        try:
+            lines = candidate.read_text(encoding="utf-8").splitlines()
+        except (OSError, UnicodeDecodeError):
+            continue
+        owners = _owner_map_for_file(lines, language)
+        for line_no, line in enumerate(lines, start=1):
+            if str(candidate) == declaration_path and line_no == declaration_line:
+                continue
+            if not call_pattern.search(line):
+                continue
+            owner = owners.get(line_no, "<module>")
+            callers.add(owner)
+            sites.append(
+                {
+                    "path": str(candidate),
+                    "line": line_no,
+                    "language": language,
+                    "caller": owner,
+                    "snippet": line.strip(),
+                }
+            )
+            if len(sites) >= max_items:
+                return {"callers": sorted(callers), "sites": sites, "truncated": True}
+    return {"callers": sorted(callers), "sites": sites, "truncated": False}
+
+
 def register(mcp: FastMCP) -> None:
     """Register contextwell-tools tools into the provided MCP server."""
 
@@ -611,6 +685,8 @@ def register(mcp: FastMCP) -> None:
         include_references: bool = False,
         include_callsites: bool = False,
         max_references_per_symbol: int = 10,
+        include_callgraph: bool = False,
+        max_callgraph_edges: int = 50,
     ) -> dict[str, object]:
         _REQUESTS["symbol_search"] += 1
         if not paths:
@@ -679,6 +755,15 @@ def register(mcp: FastMCP) -> None:
                         "items": refs,
                         "truncated": len(refs) >= max(1, max_references_per_symbol),
                     }
+                if include_callgraph:
+                    item["callgraph"] = _collect_callgraph(
+                        candidates,
+                        symbol=symbol_name,
+                        symbol_kind=symbol_kind,
+                        declaration_path=str(candidate),
+                        declaration_line=line_no,
+                        max_items=max(1, max_callgraph_edges),
+                    )
                 results.append(
                     item
                 )

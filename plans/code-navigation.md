@@ -6,7 +6,8 @@
 - Phase 2 JavaScript/TypeScript symbol coverage is implemented in `symbol_search`.
 - Richer symbol metadata and optional reference scanning are implemented in `symbol_search`.
 - Optional function callsite-aware reference classification is implemented in `symbol_search`.
-- Callgraph behavior and heavier indexing remain follow-up work.
+- Lightweight callgraph-level caller/callee site extraction is implemented in `symbol_search`.
+- Heavier indexing-backed callgraph behavior remains follow-up work.
 
 ---
 
