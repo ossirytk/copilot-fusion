@@ -546,3 +546,40 @@ def test_symbol_search_references_and_metadata(tmp_path: Path) -> None:
     assert isinstance(refs, dict)
     assert refs.get("count", 0) >= 1
     assert isinstance(refs.get("items", []), list)
+
+
+def test_symbol_search_callsites(tmp_path: Path) -> None:
+    source = tmp_path / "calls.py"
+    source.write_text(
+        "\n".join(
+            [
+                "def compute_value(x):",
+                "    return x + 1",
+                "",
+                "result = compute_value(3)",
+                "print(compute_value(4))",
+            ]
+        ),
+        encoding="utf-8",
+    )
+    result = _call(
+        "symbol_search",
+        {
+            "paths": [str(tmp_path)],
+            "query": "compute_value",
+            "kinds": ["function"],
+            "include_references": True,
+            "include_callsites": True,
+            "max_references_per_symbol": 5,
+        },
+    )
+    assert isinstance(result, dict)
+    rows = result.get("results", [])
+    assert isinstance(rows, list)
+    assert rows
+    refs = rows[0].get("references", {})
+    assert isinstance(refs, dict)
+    assert refs.get("callsite_count", 0) >= 1
+    items = refs.get("items", [])
+    assert isinstance(items, list)
+    assert any(item.get("match_type") == "callsite" for item in items if isinstance(item, dict))

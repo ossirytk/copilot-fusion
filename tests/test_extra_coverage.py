@@ -492,6 +492,22 @@ def test_read_file_max_bytes() -> None:
     assert result.get("bytes_read") == 100
 
 
+def test_read_file_with_compact_mode() -> None:
+    """read_file can optionally return compacted high-signal output."""
+    with tempfile.NamedTemporaryFile(mode="w", suffix=".log", delete=False) as f:
+        f.write("info startup\nERROR timeout from upstream\ntraceback: File \"/srv/app.py\", line 2\n")
+        tmp_path = f.name
+
+    result = _call("read_file", {"path": tmp_path, "compact": True, "compact_mode": "errors-first", "compact_max_points": 2})
+    assert isinstance(result, dict)
+    compact = result.get("compact", {})
+    assert isinstance(compact, dict)
+    assert compact.get("backend") == "deterministic"
+    stats = compact.get("stats", {})
+    assert isinstance(stats, dict)
+    assert stats.get("selected_lines", 0) >= 1
+
+
 # ---------------------------------------------------------------------------
 # Git registry tests
 # ---------------------------------------------------------------------------

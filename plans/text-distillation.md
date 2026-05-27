@@ -4,6 +4,7 @@
 
 - Phase 1 deterministic baseline is implemented as `text_compact`.
 - Phase 2 local extractive summarization backend is implemented as `text_summarize`.
+- Optional compaction output is available from `read_file` via `compact=true`.
 - Optional remote/model-backed summarization remains follow-up work.
 
 ---

@@ -139,11 +139,14 @@ def _match_symbol_from_line(line: str, language: str, selected_kinds: set[str]) 
 def _collect_references(
     files: list[tuple[Path, str]],
     symbol: str,
+    symbol_kind: str,
     declaration_path: str,
     declaration_line: int,
     max_items: int,
+    include_callsites: bool = False,
 ) -> list[dict[str, object]]:
     pattern = re.compile(rf"\b{re.escape(symbol)}\b")
+    call_pattern = re.compile(rf"\b{re.escape(symbol)}\s*\(")
     references: list[dict[str, object]] = []
     for candidate, language in files:
         try:
@@ -155,12 +158,25 @@ def _collect_references(
                 continue
             if not pattern.search(line):
                 continue
+            match_type = "reference"
+            stripped = line.strip()
+            if include_callsites and symbol_kind == "function":
+                is_declaration = False
+                if language == "python":
+                    is_declaration = bool(stripped.startswith(f"def {symbol}("))
+                else:
+                    is_declaration = bool(
+                        re.match(rf"^(?:export\s+)?(?:async\s+)?function\s+{re.escape(symbol)}\s*\(", stripped)
+                    )
+                if not is_declaration and call_pattern.search(line):
+                    match_type = "callsite"
             references.append(
                 {
                     "path": str(candidate),
                     "line": line_no,
                     "language": language,
                     "snippet": line.strip(),
+                    "match_type": match_type,
                 }
             )
             if len(references) >= max_items:
@@ -593,6 +609,7 @@ def register(mcp: FastMCP) -> None:
         kinds: list[str] | None = None,
         max_results: int = 500,
         include_references: bool = False,
+        include_callsites: bool = False,
         max_references_per_symbol: int = 10,
     ) -> dict[str, object]:
         _REQUESTS["symbol_search"] += 1
@@ -650,12 +667,15 @@ def register(mcp: FastMCP) -> None:
                     refs = _collect_references(
                         candidates,
                         symbol=symbol_name,
+                        symbol_kind=symbol_kind,
                         declaration_path=str(candidate),
                         declaration_line=line_no,
                         max_items=max(1, max_references_per_symbol),
+                        include_callsites=include_callsites,
                     )
                     item["references"] = {
                         "count": len(refs),
+                        "callsite_count": sum(1 for ref in refs if ref.get("match_type") == "callsite"),
                         "items": refs,
                         "truncated": len(refs) >= max(1, max_references_per_symbol),
                     }
@@ -672,6 +692,9 @@ def register(mcp: FastMCP) -> None:
         start_line: int = 1,
         end_line: int = -1,
         max_bytes: int = 200_000,
+        compact: bool = False,
+        compact_mode: str = "auto",
+        compact_max_points: int = 20,
     ) -> dict[str, object]:
         _REQUESTS["read_file"] += 1
         resolved = resolve_path(path)
@@ -687,7 +710,7 @@ def register(mcp: FastMCP) -> None:
             selected: list[str] = []
         else:
             selected = lines[s - 1 : e]
-        return {
+        result = {
             "path": str(resolved),
             "content": "\n".join(selected),
             "start_line": s,
@@ -695,6 +718,12 @@ def register(mcp: FastMCP) -> None:
             "truncated": truncated,
             "bytes_read": len(data),
         }
+        if compact:
+            compact_result = text_compact(
+                text=result["content"], mode=compact_mode, max_points=compact_max_points
+            )
+            result["compact"] = compact_result
+        return result
 
     @mcp.tool
     def json_select(
