@@ -509,3 +509,40 @@ def test_symbol_search_javascript_and_typescript(tmp_path: Path) -> None:
     assert isinstance(rows, list)
     assert any(item.get("symbol") == "runTask" for item in rows if isinstance(item, dict))
     assert any(item.get("language") == "typescript" for item in rows if isinstance(item, dict))
+
+
+def test_symbol_search_references_and_metadata(tmp_path: Path) -> None:
+    source = tmp_path / "refs.py"
+    source.write_text(
+        "\n".join(
+            [
+                "def build_client():",
+                "    return 1",
+                "",
+                "x = build_client()",
+                "print(build_client())",
+            ]
+        ),
+        encoding="utf-8",
+    )
+    result = _call(
+        "symbol_search",
+        {
+            "paths": [str(tmp_path)],
+            "query": "build_client",
+            "kinds": ["function"],
+            "include_references": True,
+            "max_references_per_symbol": 2,
+        },
+    )
+    assert isinstance(result, dict)
+    rows = result.get("results", [])
+    assert isinstance(rows, list)
+    assert rows
+    function_row = rows[0]
+    assert function_row.get("column", 0) >= 1
+    assert "indent" in function_row
+    refs = function_row.get("references", {})
+    assert isinstance(refs, dict)
+    assert refs.get("count", 0) >= 1
+    assert isinstance(refs.get("items", []), list)

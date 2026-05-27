@@ -4,7 +4,8 @@
 
 - Phase 1 lightweight Python symbol lookup is implemented as `symbol_search`.
 - Phase 2 JavaScript/TypeScript symbol coverage is implemented in `symbol_search`.
-- Richer index/callgraph behavior remains follow-up work.
+- Richer symbol metadata and optional reference scanning are implemented in `symbol_search`.
+- Callgraph behavior and heavier indexing remain follow-up work.
 
 ---
 

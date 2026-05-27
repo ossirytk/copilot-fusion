@@ -21,9 +21,11 @@ This document is the source-of-truth plan for the distillation track.
 - Existing relevant tools:
   - `read_file` (bounded reading),
   - `text_search` (literal/regex),
+  - `text_compact` (deterministic compaction),
+  - `text_summarize` (local extractive summarization),
   - `json_select` / `yaml_select` (structured extraction),
-  - no dedicated summarization/compaction/NER tool.
-- Current fused tool surface: **50 tools**.
+- no dedicated entity-centric extraction/NER tool yet.
+- Current fused tool surface: **54 tools**.
 - Tool budget appears to have room, but UX clarity still matters.
 
 ---

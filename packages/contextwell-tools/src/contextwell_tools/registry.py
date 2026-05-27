@@ -136,6 +136,38 @@ def _match_symbol_from_line(line: str, language: str, selected_kinds: set[str]) 
     return "", ""
 
 
+def _collect_references(
+    files: list[tuple[Path, str]],
+    symbol: str,
+    declaration_path: str,
+    declaration_line: int,
+    max_items: int,
+) -> list[dict[str, object]]:
+    pattern = re.compile(rf"\b{re.escape(symbol)}\b")
+    references: list[dict[str, object]] = []
+    for candidate, language in files:
+        try:
+            lines = candidate.read_text(encoding="utf-8").splitlines()
+        except (OSError, UnicodeDecodeError):
+            continue
+        for line_no, line in enumerate(lines, start=1):
+            if str(candidate) == declaration_path and line_no == declaration_line:
+                continue
+            if not pattern.search(line):
+                continue
+            references.append(
+                {
+                    "path": str(candidate),
+                    "line": line_no,
+                    "language": language,
+                    "snippet": line.strip(),
+                }
+            )
+            if len(references) >= max_items:
+                return references
+    return references
+
+
 def register(mcp: FastMCP) -> None:
     """Register contextwell-tools tools into the provided MCP server."""
 
@@ -560,6 +592,8 @@ def register(mcp: FastMCP) -> None:
         query: str = "",
         kinds: list[str] | None = None,
         max_results: int = 500,
+        include_references: bool = False,
+        max_references_per_symbol: int = 10,
     ) -> dict[str, object]:
         _REQUESTS["symbol_search"] += 1
         if not paths:
@@ -600,15 +634,33 @@ def register(mcp: FastMCP) -> None:
                     continue
                 if q and q not in symbol_name.lower():
                     continue
-                results.append(
-                    {
-                        "path": str(candidate),
-                        "line": line_no,
-                        "symbol": symbol_name,
-                        "kind": symbol_kind,
-                        "language": language,
-                        "signature": line.strip(),
+                column = line.find(symbol_name) + 1
+                indent = len(line) - len(line.lstrip(" "))
+                item: dict[str, object] = {
+                    "path": str(candidate),
+                    "line": line_no,
+                    "column": column if column > 0 else 1,
+                    "symbol": symbol_name,
+                    "kind": symbol_kind,
+                    "language": language,
+                    "signature": line.strip(),
+                    "indent": indent,
+                }
+                if include_references:
+                    refs = _collect_references(
+                        candidates,
+                        symbol=symbol_name,
+                        declaration_path=str(candidate),
+                        declaration_line=line_no,
+                        max_items=max(1, max_references_per_symbol),
+                    )
+                    item["references"] = {
+                        "count": len(refs),
+                        "items": refs,
+                        "truncated": len(refs) >= max(1, max_references_per_symbol),
                     }
+                results.append(
+                    item
                 )
                 if len(results) >= max(1, max_results):
                     return {"results": results, "truncated": True}
