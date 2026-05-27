@@ -164,3 +164,55 @@ def test_remember_file_markdown_split() -> None:
     for m in memories:
         if isinstance(m, dict) and "id" in m:
             _call("forget", {"memory_id": m["id"]})
+
+
+def test_text_compact_from_text() -> None:
+    payload = "\n".join(
+        [
+            "info: startup complete",
+            "2026-05-27T14:00:00Z ERROR TimeoutError while calling https://api.example.dev/v1/items",
+            "warning: retrying request",
+            "traceback: File \"/srv/app/main.py\", line 42",
+        ]
+    )
+    result = _call("text_compact", {"text": payload, "max_points": 3})
+    assert isinstance(result, dict)
+    assert result.get("backend") == "deterministic"
+    stats = result.get("stats", {})
+    assert isinstance(stats, dict)
+    assert stats.get("input_lines") == 4
+    assert stats.get("selected_lines", 0) >= 1
+    patterns = result.get("patterns", [])
+    assert isinstance(patterns, list)
+    assert any("TimeoutError" == p.get("pattern") for p in patterns if isinstance(p, dict))
+
+
+def test_text_compact_from_path_with_filters(tmp_path: Path) -> None:
+    source = tmp_path / "log.txt"
+    source.write_text(
+        "\n".join(
+            [
+                "INFO Connected to /srv/app/config.yaml",
+                "ERROR payment failed for order 123",
+                "WARN noisy line to skip",
+                "ERROR blocked by policy",
+            ]
+        ),
+        encoding="utf-8",
+    )
+    result = _call(
+        "text_compact",
+        {
+            "path": str(source),
+            "mode": "errors-first",
+            "include_patterns": ["payment"],
+            "exclude_patterns": ["noisy"],
+            "max_points": 5,
+        },
+    )
+    assert isinstance(result, dict)
+    selected = result.get("selected", [])
+    assert isinstance(selected, list)
+    assert selected
+    assert all("noisy" not in str(item.get("text", "")).lower() for item in selected if isinstance(item, dict))
+    assert any("payment" in str(item.get("text", "")).lower() for item in selected if isinstance(item, dict))

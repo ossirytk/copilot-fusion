@@ -7,6 +7,7 @@ import json
 import re
 from collections import Counter, deque
 from pathlib import Path
+from statistics import mean
 from typing import Any
 
 from fastmcp import FastMCP
@@ -24,6 +25,12 @@ except ModuleNotFoundError:  # pragma: no cover
 
 
 _REQUESTS = Counter()
+_DEFAULT_SIGNAL_RE = re.compile(r"\b(error|warn|warning|fail|failed|exception|traceback|fatal|panic|timeout)\b", re.IGNORECASE)
+_STACK_RE = re.compile(r"(^\s+at\s+\S)|(^\s*caused by:)|(\bFile \".*\", line \d+\b)", re.IGNORECASE)
+_URL_RE = re.compile(r"https?://[^\s]+", re.IGNORECASE)
+_PATH_RE = re.compile(r"(/[\w.\-]+(?:/[\w.\-]+)+)")
+_TS_RE = re.compile(r"\b\d{4}-\d{2}-\d{2}[T ][0-2]\d:[0-5]\d:[0-5]\d(?:\.\d+)?(?:Z|[+-]\d{2}:\d{2})?\b")
+_CLASSLIKE_RE = re.compile(r"\b([A-Z][A-Za-z0-9_]*(?:Error|Exception|Warning))\b")
 
 
 def _project(node: Any, field: str) -> Any:
@@ -42,6 +49,16 @@ def _project(node: Any, field: str) -> Any:
             return None
         current = current[part]
     return current
+
+
+def _compile_patterns(patterns: list[str] | None) -> tuple[list[re.Pattern[str]], str | None]:
+    compiled: list[re.Pattern[str]] = []
+    for pattern in patterns or []:
+        try:
+            compiled.append(re.compile(pattern, re.IGNORECASE))
+        except re.error as exc:
+            return [], f"Invalid regex pattern: {pattern!r} ({exc})"
+    return compiled, None
 
 
 def register(mcp: FastMCP) -> None:
@@ -126,6 +143,120 @@ def register(mcp: FastMCP) -> None:
                         if len(results) >= max_results:
                             return {"results": results, "truncated": True}
         return {"results": results, "truncated": False}
+
+    @mcp.tool
+    def text_compact(
+        text: str = "",
+        path: str = "",
+        mode: str = "auto",
+        max_points: int = 20,
+        include_patterns: list[str] | None = None,
+        exclude_patterns: list[str] | None = None,
+    ) -> dict[str, object]:
+        _REQUESTS["text_compact"] += 1
+        if not text and not path:
+            return {"error": "Either text or path must be provided."}
+        if mode not in {"auto", "errors-first"}:
+            return {"error": f"Unsupported mode: {mode}"}
+
+        include_re, include_err = _compile_patterns(include_patterns)
+        if include_err:
+            return {"error": include_err}
+        exclude_re, exclude_err = _compile_patterns(exclude_patterns)
+        if exclude_err:
+            return {"error": exclude_err}
+
+        source_text = text
+        if path:
+            try:
+                source_text = resolve_path(path).read_text(encoding="utf-8")
+            except (OSError, UnicodeDecodeError) as exc:
+                return {"error": f"Failed to read file: {exc}"}
+
+        lines = source_text.splitlines()
+        points = max(1, min(max_points, 200))
+        candidates: list[dict[str, object]] = []
+        pattern_hits = Counter()
+        entity_hits: dict[str, Counter[str]] = {"url": Counter(), "path": Counter(), "timestamp": Counter()}
+
+        for line_no, raw_line in enumerate(lines, start=1):
+            line = raw_line.strip()
+            if not line:
+                continue
+            if any(rx.search(line) for rx in exclude_re):
+                continue
+
+            score = 0
+            reasons: list[str] = []
+            if _DEFAULT_SIGNAL_RE.search(line):
+                score += 4
+                reasons.append("signal")
+            if _STACK_RE.search(line):
+                score += 2
+                reasons.append("stack")
+            if include_re and any(rx.search(line) for rx in include_re):
+                score += 3
+                reasons.append("include")
+            if mode == "errors-first" and score == 0:
+                continue
+
+            for match in _CLASSLIKE_RE.findall(line):
+                pattern_hits[match] += 1
+            for keyword in ("error", "warning", "exception", "timeout", "failed", "panic"):
+                if re.search(rf"\b{keyword}\b", line, re.IGNORECASE):
+                    pattern_hits[keyword] += 1
+
+            for url in _URL_RE.findall(line):
+                entity_hits["url"][url] += 1
+            for found_path in _PATH_RE.findall(line):
+                entity_hits["path"][found_path] += 1
+            for ts in _TS_RE.findall(line):
+                entity_hits["timestamp"][ts] += 1
+
+            candidates.append({"line": line_no, "text": line, "score": score, "reasons": reasons})
+
+        if not candidates:
+            fallback = [{"line": i + 1, "text": ln.strip(), "score": 0, "reasons": ["fallback"]} for i, ln in enumerate(lines)]
+            candidates = [c for c in fallback if c["text"]]
+
+        ranked = sorted(candidates, key=lambda item: (int(item["score"]), -int(item["line"])), reverse=True)
+        selected: list[dict[str, object]] = []
+        seen = set()
+        for item in ranked:
+            if item["text"] in seen:
+                continue
+            seen.add(str(item["text"]))
+            selected.append(
+                {
+                    "line": item["line"],
+                    "text": item["text"],
+                    "reason": ",".join(item["reasons"]) if item["reasons"] else "context",
+                }
+            )
+            if len(selected) >= points:
+                break
+
+        top_patterns = [{"pattern": key, "count": count} for key, count in pattern_hits.most_common(10)]
+        entities: list[dict[str, object]] = []
+        for kind, counts in entity_hits.items():
+            entities.extend([{"type": kind, "value": value, "count": count} for value, count in counts.most_common(5)])
+
+        bullets = [entry["text"] for entry in selected[: min(5, len(selected))]]
+        avg_score = mean([int(item["score"]) for item in candidates]) if candidates else 0.0
+        summary = f"Selected {len(selected)} high-signal lines from {len(lines)} input lines (avg score {avg_score:.2f})."
+        return {
+            "summary": summary,
+            "bullets": bullets,
+            "patterns": top_patterns,
+            "entities": entities,
+            "stats": {
+                "input_lines": len(lines),
+                "selected_lines": len(selected),
+                "truncated": len(candidates) > len(selected),
+            },
+            "backend": "deterministic",
+            "selected": selected,
+        }
 
     @mcp.tool
     def read_file(

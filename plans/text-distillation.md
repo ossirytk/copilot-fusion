@@ -1,5 +1,12 @@
 # Text Distillation / Summarization Brainstorm Plan
 
+## Status
+
+- Phase 1 deterministic baseline is implemented as `text_compact`.
+- Phase 2 (optional summarization backend) remains planned.
+
+---
+
 ## Goal
 
 Design a capability that extracts essential signal from large text (error logs, web pages, long docs) with predictable output for Copilot workflows.

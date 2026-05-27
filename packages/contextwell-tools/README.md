@@ -1,3 +1,3 @@
 # contextwell-tools
 
-Scaffold package for file/code tooling features migrating from toolpilot.
+Filesystem/code tooling domain for copilot-fusion, including search, structured extraction, and deterministic text compaction.
