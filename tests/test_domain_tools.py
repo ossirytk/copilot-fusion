@@ -218,6 +218,20 @@ def test_text_compact_from_path_with_filters(tmp_path: Path) -> None:
     assert any("payment" in str(item.get("text", "")).lower() for item in selected if isinstance(item, dict))
 
 
+def test_text_compact_invalid_inputs() -> None:
+    empty = _call("text_compact", {})
+    assert isinstance(empty, dict)
+    assert "error" in empty
+
+    bad_mode = _call("text_compact", {"text": "hello", "mode": "strict"})
+    assert isinstance(bad_mode, dict)
+    assert "error" in bad_mode
+
+    bad_pattern = _call("text_compact", {"text": "hello", "include_patterns": ["["]})
+    assert isinstance(bad_pattern, dict)
+    assert "error" in bad_pattern
+
+
 def test_apply_text_patch_replace_and_insert(tmp_path: Path) -> None:
     target = tmp_path / "sample.txt"
     target.write_text("alpha\nbeta\ngamma\n", encoding="utf-8")
@@ -269,6 +283,37 @@ def test_apply_text_patch_guardrails(tmp_path: Path) -> None:
     assert "error" in overlap
 
 
+def test_apply_text_patch_dry_run_and_create(tmp_path: Path) -> None:
+    target = tmp_path / "dry.txt"
+    target.write_text("alpha\nbeta\n", encoding="utf-8")
+
+    dry = _call(
+        "apply_text_patch",
+        {
+            "path": str(target),
+            "edits": [{"start_line": 2, "end_line": 2, "content": "BETA"}],
+            "dry_run": True,
+        },
+    )
+    assert isinstance(dry, dict)
+    assert "error" not in dry
+    assert dry.get("changed") is True
+    assert target.read_text(encoding="utf-8") == "alpha\nbeta\n"
+
+    created = tmp_path / "created.txt"
+    created_result = _call(
+        "apply_text_patch",
+        {
+            "path": str(created),
+            "create": True,
+            "edits": [{"start_line": 1, "end_line": 0, "content": "first line"}],
+        },
+    )
+    assert isinstance(created_result, dict)
+    assert "error" not in created_result
+    assert created.read_text(encoding="utf-8") == "first line"
+
+
 def test_symbol_search_python_symbols(tmp_path: Path) -> None:
     target = tmp_path / "module.py"
     target.write_text(
@@ -300,3 +345,24 @@ def test_symbol_search_invalid_kind(tmp_path: Path) -> None:
     result = _call("symbol_search", {"paths": [str(target)], "kinds": ["method"]})
     assert isinstance(result, dict)
     assert "error" in result
+
+
+def test_symbol_search_truncation(tmp_path: Path) -> None:
+    target = tmp_path / "many.py"
+    target.write_text(
+        "\n".join(
+            [
+                "def one():",
+                "    return 1",
+                "def two():",
+                "    return 2",
+                "def three():",
+                "    return 3",
+            ]
+        ),
+        encoding="utf-8",
+    )
+    result = _call("symbol_search", {"paths": [str(target)], "max_results": 2})
+    assert isinstance(result, dict)
+    assert result.get("truncated") is True
+    assert len(result.get("results", [])) == 2
