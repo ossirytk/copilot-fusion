@@ -1,6 +1,8 @@
 import asyncio
 import json
 import tempfile
+import threading
+from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
 from pathlib import Path
 
 from copilot_fusion.server import create_server
@@ -263,6 +265,78 @@ def test_text_summarize_invalid_inputs() -> None:
     invalid = _call("text_summarize", {"text": "hello", "backend": "remote"})
     assert isinstance(invalid, dict)
     assert "error" in invalid
+
+
+def test_text_summarize_remote_backend(monkeypatch) -> None:
+    request_state: dict[str, object] = {}
+
+    class Handler(BaseHTTPRequestHandler):
+        def do_POST(self) -> None:  # noqa: N802
+            length = int(self.headers.get("Content-Length", "0"))
+            payload = self.rfile.read(length).decode("utf-8")
+            request_state["payload"] = json.loads(payload)
+            request_state["auth"] = self.headers.get("Authorization", "")
+            body = json.dumps(
+                {
+                    "summary": "remote summary",
+                    "bullets": ["alpha", "beta"],
+                    "stats": {"backend": "remote"},
+                }
+            ).encode("utf-8")
+            self.send_response(200)
+            self.send_header("Content-Type", "application/json")
+            self.send_header("Content-Length", str(len(body)))
+            self.end_headers()
+            self.wfile.write(body)
+
+        def log_message(self, format: str, *args: object) -> None:  # noqa: A003
+            return
+
+    server = ThreadingHTTPServer(("127.0.0.1", 0), Handler)
+    thread = threading.Thread(target=server.serve_forever, daemon=True)
+    thread.start()
+    try:
+        monkeypatch.setenv("FUSION_TEXT_SUMMARIZER_URL", f"http://127.0.0.1:{server.server_port}/summarize")
+        monkeypatch.setenv("FUSION_TEXT_SUMMARIZER_TOKEN", "secret-token")
+        result = _call("text_summarize", {"text": "hello world", "backend": "remote", "max_sentences": 2})
+        assert isinstance(result, dict)
+        assert result.get("backend") == "remote"
+        assert result.get("summary") == "remote summary"
+        assert result.get("bullets") == ["alpha", "beta"]
+        assert request_state.get("payload") == {"text": "hello world", "max_sentences": 2}
+        assert request_state.get("auth") == "Bearer secret-token"
+    finally:
+        server.shutdown()
+        server.server_close()
+        thread.join(timeout=5)
+
+
+def test_text_summarize_auto_prefers_remote(monkeypatch) -> None:
+    class Handler(BaseHTTPRequestHandler):
+        def do_POST(self) -> None:  # noqa: N802
+            body = json.dumps({"summary": "auto remote", "bullets": ["one"], "stats": {}}).encode("utf-8")
+            self.send_response(200)
+            self.send_header("Content-Type", "application/json")
+            self.send_header("Content-Length", str(len(body)))
+            self.end_headers()
+            self.wfile.write(body)
+
+        def log_message(self, format: str, *args: object) -> None:  # noqa: A003
+            return
+
+    server = ThreadingHTTPServer(("127.0.0.1", 0), Handler)
+    thread = threading.Thread(target=server.serve_forever, daemon=True)
+    thread.start()
+    try:
+        monkeypatch.setenv("FUSION_TEXT_SUMMARIZER_URL", f"http://127.0.0.1:{server.server_port}/summarize")
+        result = _call("text_summarize", {"text": "hello world", "backend": "auto"})
+        assert isinstance(result, dict)
+        assert result.get("backend") == "remote"
+        assert result.get("summary") == "auto remote"
+    finally:
+        server.shutdown()
+        server.server_close()
+        thread.join(timeout=5)
 
 
 def test_apply_text_patch_replace_and_insert(tmp_path: Path) -> None:

@@ -4,8 +4,8 @@
 
 - Phase 1 deterministic baseline is implemented as `text_compact`.
 - Phase 2 local extractive summarization backend is implemented as `text_summarize`.
+- Phase 3 optional remote/model-backed summarization is implemented via `FUSION_TEXT_SUMMARIZER_URL`.
 - Optional compaction output is available from `read_file` via `compact=true`.
-- Optional remote/model-backed summarization remains follow-up work.
 
 ---
 

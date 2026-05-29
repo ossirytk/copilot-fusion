@@ -4,11 +4,14 @@ from __future__ import annotations
 
 import hashlib
 import json
+import os
 import re
 from collections import Counter, deque
 from pathlib import Path
 from statistics import mean
 from typing import Any
+from urllib.error import HTTPError, URLError
+from urllib.request import Request, urlopen
 
 from fastmcp import FastMCP
 from copilot_fusion_shared import resolve_path
@@ -103,6 +106,44 @@ def _extractive_summary(text: str, max_sentences: int) -> tuple[str, list[str], 
         "truncated": len(sentences) > len(ordered),
     }
     return summary, ordered, stats
+
+
+def _remote_text_summary(text: str, max_sentences: int, endpoint: str, token: str = "") -> dict[str, object]:
+    payload = json.dumps({"text": text, "max_sentences": max_sentences}).encode("utf-8")
+    headers = {"Content-Type": "application/json"}
+    if token:
+        headers["Authorization"] = f"Bearer {token}"
+    request = Request(endpoint, data=payload, headers=headers, method="POST")
+    try:
+        with urlopen(request, timeout=10) as response:
+            raw = response.read().decode("utf-8")
+    except (HTTPError, URLError, TimeoutError) as exc:
+        return {"error": f"Remote summarization request failed: {exc}"}
+
+    try:
+        data = json.loads(raw)
+    except json.JSONDecodeError as exc:
+        return {"error": f"Remote summarization returned invalid JSON: {exc}"}
+
+    if not isinstance(data, dict):
+        return {"error": "Remote summarization response must be a JSON object."}
+
+    summary = str(data.get("summary", "")).strip()
+    bullets = data.get("bullets", [])
+    if not isinstance(bullets, list):
+        bullets = []
+    stats = data.get("stats", {})
+    if not isinstance(stats, dict):
+        stats = {}
+    if not summary:
+        return {"error": "Remote summarization response did not include a summary."}
+
+    return {
+        "summary": summary,
+        "bullets": [str(item) for item in bullets[:max(1, max_sentences)]],
+        "stats": stats,
+        "backend": "remote",
+    }
 
 
 def _match_symbol_from_line(line: str, language: str, selected_kinds: set[str]) -> tuple[str, str]:
@@ -465,7 +506,7 @@ def register(mcp: FastMCP) -> None:
         _REQUESTS["text_summarize"] += 1
         if not text and not path:
             return {"error": "Either text or path must be provided."}
-        if backend not in {"auto", "extractive"}:
+        if backend not in {"auto", "extractive", "remote"}:
             return {"error": f"Unsupported backend: {backend}"}
 
         source_text = text
@@ -474,6 +515,20 @@ def register(mcp: FastMCP) -> None:
                 source_text = resolve_path(path).read_text(encoding="utf-8")
             except (OSError, UnicodeDecodeError) as exc:
                 return {"error": f"Failed to read file: {exc}"}
+
+        remote_endpoint = os.getenv("FUSION_TEXT_SUMMARIZER_URL", "").strip()
+        remote_token = os.getenv("FUSION_TEXT_SUMMARIZER_TOKEN", "").strip()
+        if backend == "remote":
+            if not remote_endpoint:
+                return {"error": "FUSION_TEXT_SUMMARIZER_URL must be set for backend=remote."}
+            return _remote_text_summary(source_text, max_sentences=max_sentences, endpoint=remote_endpoint, token=remote_token)
+
+        if backend == "auto" and remote_endpoint:
+            remote_result = _remote_text_summary(
+                source_text, max_sentences=max_sentences, endpoint=remote_endpoint, token=remote_token
+            )
+            if "error" not in remote_result:
+                return remote_result
 
         summary, bullets, summary_stats = _extractive_summary(source_text, max_sentences=max_sentences)
         chosen_backend = "local-extractive"
