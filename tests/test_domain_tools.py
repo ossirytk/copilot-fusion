@@ -376,6 +376,58 @@ def test_text_summarize_auto_prefers_remote(monkeypatch) -> None:
         thread.join(timeout=5)
 
 
+def test_text_distillation_quality_checks_on_logs() -> None:
+    corpus = "\n".join(
+        [
+            "INFO boot complete",
+            "INFO polling upstream service",
+            "ERROR TimeoutError while calling https://api.example.dev/v1/items",
+            "Traceback (most recent call last):",
+            '  File "/srv/app/main.py", line 41, in run',
+            "WARN retrying request after timeout",
+            "INFO request succeeded on retry",
+        ]
+    )
+    compact = _call("text_compact", {"text": corpus, "mode": "errors-first", "max_points": 4})
+    summarize = _call("text_summarize", {"text": corpus, "max_sentences": 2})
+
+    assert isinstance(compact, dict)
+    compact_selected = " ".join(
+        str(item.get("text", "")) for item in compact.get("selected", []) if isinstance(item, dict)
+    )
+    assert "TimeoutError" in compact_selected
+    assert "Traceback" in compact_selected
+
+    assert isinstance(summarize, dict)
+    assert "TimeoutError" in str(summarize.get("summary", ""))
+    assert summarize.get("backend") == "local-extractive"
+
+
+def test_text_distillation_quality_checks_on_prose() -> None:
+    corpus = "\n".join(
+        [
+            "The release candidate ships with a smaller bundle and faster startup.",
+            "We are deprecating the legacy migration path in favor of the new workflow.",
+            "This note contains extra background that should be less important.",
+            "The migration guide highlights compatibility and rollout steps.",
+        ]
+    )
+    compact = _call("text_compact", {"text": corpus, "max_points": 3, "include_patterns": ["migration", "release"]})
+    summarize = _call("text_summarize", {"text": corpus, "max_sentences": 2})
+
+    assert isinstance(compact, dict)
+    compact_selected = " ".join(
+        str(item.get("text", "")) for item in compact.get("selected", []) if isinstance(item, dict)
+    ).lower()
+    assert "migration" in compact_selected
+    assert "release" in compact_selected
+
+    assert isinstance(summarize, dict)
+    summary = str(summarize.get("summary", "")).lower()
+    assert "migration" in summary or "release" in summary
+    assert len(summarize.get("bullets", [])) <= 2
+
+
 def test_apply_text_patch_replace_and_insert(tmp_path: Path) -> None:
     target = tmp_path / "sample.txt"
     target.write_text("alpha\nbeta\ngamma\n", encoding="utf-8")

@@ -31,6 +31,16 @@ This document is the source-of-truth plan for the distillation track.
 
 ---
 
+## Usage guidance
+
+- Use `text_compact` when you have noisy text and want deterministic high-signal extraction.
+- Use `read_file(compact=true)` when you already need bounded file content and want compacted signal in one call.
+- Use `text_summarize` when you want a short narrative summary; choose `backend="auto"` when a remote endpoint is configured.
+- Prefer `text_search` for exact token/regex discovery rather than summarization.
+- Keep `text_compact` for logs, trace output, and mixed technical noise where line selection matters.
+
+---
+
 ## Design Principles
 
 1. Deterministic defaults for automation.
