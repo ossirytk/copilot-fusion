@@ -116,9 +116,13 @@ def _remote_text_summary(text: str, max_sentences: int, endpoint: str, token: st
     request = Request(endpoint, data=payload, headers=headers, method="POST")
     try:
         with urlopen(request, timeout=10) as response:
-            raw = response.read().decode("utf-8")
+            raw_bytes = response.read()
     except (HTTPError, URLError, TimeoutError) as exc:
         return {"error": f"Remote summarization request failed: {exc}"}
+    try:
+        raw = raw_bytes.decode("utf-8")
+    except UnicodeDecodeError as exc:
+        return {"error": f"Remote summarization returned non-UTF8 response: {exc}"}
 
     try:
         data = json.loads(raw)
@@ -185,15 +189,20 @@ def _collect_references(
     declaration_line: int,
     max_items: int,
     include_callsites: bool = False,
+    file_cache: dict[Path, list[str]] | None = None,
 ) -> list[dict[str, object]]:
     pattern = re.compile(rf"\b{re.escape(symbol)}\b")
     call_pattern = re.compile(rf"\b{re.escape(symbol)}\s*\(")
     references: list[dict[str, object]] = []
     for candidate, language in files:
-        try:
-            lines = candidate.read_text(encoding="utf-8").splitlines()
-        except (OSError, UnicodeDecodeError):
-            continue
+        lines = file_cache.get(candidate) if file_cache is not None else None
+        if lines is None:
+            try:
+                lines = candidate.read_text(encoding="utf-8").splitlines()
+            except (OSError, UnicodeDecodeError):
+                continue
+            if file_cache is not None:
+                file_cache[candidate] = lines
         for line_no, line in enumerate(lines, start=1):
             if str(candidate) == declaration_path and line_no == declaration_line:
                 continue
@@ -264,6 +273,7 @@ def _collect_callgraph(
     declaration_path: str,
     declaration_line: int,
     max_items: int,
+    file_cache: dict[Path, list[str]] | None = None,
 ) -> dict[str, object]:
     if symbol_kind != "function":
         return {"callers": [], "sites": [], "truncated": False}
@@ -273,10 +283,14 @@ def _collect_callgraph(
     sites: list[dict[str, object]] = []
 
     for candidate, language in files:
-        try:
-            lines = candidate.read_text(encoding="utf-8").splitlines()
-        except (OSError, UnicodeDecodeError):
-            continue
+        lines = file_cache.get(candidate) if file_cache is not None else None
+        if lines is None:
+            try:
+                lines = candidate.read_text(encoding="utf-8").splitlines()
+            except (OSError, UnicodeDecodeError):
+                continue
+            if file_cache is not None:
+                file_cache[candidate] = lines
         owners = _owner_map_for_file(lines, language)
         for line_no, line in enumerate(lines, start=1):
             if str(candidate) == declaration_path and line_no == declaration_line:
@@ -388,6 +402,7 @@ def register(mcp: FastMCP) -> None:
         path: str = "",
         mode: str = "auto",
         max_points: int = 20,
+        max_bytes: int = 200_000,
         include_patterns: list[str] | None = None,
         exclude_patterns: list[str] | None = None,
     ) -> dict[str, object]:
@@ -405,10 +420,16 @@ def register(mcp: FastMCP) -> None:
             return {"error": exclude_err}
 
         source_text = text
+        input_truncated = False
         if path:
             try:
-                source_text = resolve_path(path).read_text(encoding="utf-8")
-            except (OSError, UnicodeDecodeError) as exc:
+                resolved = resolve_path(path)
+                file_size = resolved.stat().st_size
+                with resolved.open("rb") as fh:
+                    data = fh.read(max_bytes if max_bytes > 0 else -1)
+                source_text = data.decode("utf-8", errors="replace")
+                input_truncated = max_bytes > 0 and file_size > max_bytes
+            except OSError as exc:
                 return {"error": f"Failed to read file: {exc}"}
 
         lines = source_text.splitlines()
@@ -490,7 +511,7 @@ def register(mcp: FastMCP) -> None:
             "stats": {
                 "input_lines": len(lines),
                 "selected_lines": len(selected),
-                "truncated": len(candidates) > len(selected),
+                "truncated": input_truncated or len(candidates) > len(selected),
             },
             "backend": "deterministic",
             "selected": selected,
@@ -556,20 +577,25 @@ def register(mcp: FastMCP) -> None:
         if not edits:
             return {"error": "edits must contain at least one edit item."}
 
+        effective_workspace_root = workspace_root.strip() or os.getenv("FUSION_WORKSPACE_ROOT", "").strip()
+        if not effective_workspace_root:
+            return {
+                "error": "workspace_root is required (or set FUSION_WORKSPACE_ROOT).",
+                "details": {"type": "workspace-root-required"},
+            }
         resolved = resolve_path(path)
-        if workspace_root:
-            root = resolve_path(workspace_root)
-            try:
-                resolved.relative_to(root)
-            except ValueError:
-                return {
-                    "error": "Target path is outside configured workspace_root.",
-                    "details": {
-                        "type": "path-outside-root",
-                        "path": str(resolved),
-                        "workspace_root": str(root),
-                    },
-                }
+        root = resolve_path(effective_workspace_root)
+        try:
+            resolved.relative_to(root)
+        except ValueError:
+            return {
+                "error": "Target path is outside configured workspace_root.",
+                "details": {
+                    "type": "path-outside-root",
+                    "path": str(resolved),
+                    "workspace_root": str(root),
+                },
+            }
         exists = resolved.exists()
         if exists and resolved.is_dir():
             return {"error": "Path points to a directory, expected a file."}
@@ -718,7 +744,7 @@ def register(mcp: FastMCP) -> None:
             "after_hash": after_hash,
             "line_count_before": len(lines),
             "line_count_after": len(updated_lines),
-            "workspace_root": workspace_root,
+            "workspace_root": str(root),
             "normalized_edits": [
                 {
                     "index": int(edit["index"]),
@@ -770,12 +796,16 @@ def register(mcp: FastMCP) -> None:
 
         q = query.lower().strip()
         results: list[dict[str, object]] = []
+        file_cache: dict[Path, list[str]] = {}
 
         for candidate, language in candidates:
-            try:
-                file_lines = candidate.read_text(encoding="utf-8").splitlines()
-            except (OSError, UnicodeDecodeError):
-                continue
+            file_lines = file_cache.get(candidate)
+            if file_lines is None:
+                try:
+                    file_lines = candidate.read_text(encoding="utf-8").splitlines()
+                except (OSError, UnicodeDecodeError):
+                    continue
+                file_cache[candidate] = file_lines
             for line_no, line in enumerate(file_lines, start=1):
                 symbol_kind, symbol_name = _match_symbol_from_line(line, language=language, selected_kinds=selected_kinds)
                 if not symbol_kind:
@@ -803,6 +833,7 @@ def register(mcp: FastMCP) -> None:
                         declaration_line=line_no,
                         max_items=max(1, max_references_per_symbol),
                         include_callsites=include_callsites,
+                        file_cache=file_cache,
                     )
                     item["references"] = {
                         "count": len(refs),
@@ -818,6 +849,7 @@ def register(mcp: FastMCP) -> None:
                         declaration_path=str(candidate),
                         declaration_line=line_no,
                         max_items=max(1, max_callgraph_edges),
+                        file_cache=file_cache,
                     )
                 results.append(
                     item

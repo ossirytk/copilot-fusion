@@ -220,6 +220,16 @@ def test_text_compact_from_path_with_filters(tmp_path: Path) -> None:
     assert any("payment" in str(item.get("text", "")).lower() for item in selected if isinstance(item, dict))
 
 
+def test_text_compact_from_path_respects_max_bytes(tmp_path: Path) -> None:
+    source = tmp_path / "large.log"
+    source.write_bytes(b"A" * 1024)
+    result = _call("text_compact", {"path": str(source), "max_bytes": 10})
+    assert isinstance(result, dict)
+    stats = result.get("stats", {})
+    assert isinstance(stats, dict)
+    assert stats.get("truncated") is True
+
+
 def test_text_compact_invalid_inputs() -> None:
     empty = _call("text_compact", {})
     assert isinstance(empty, dict)
@@ -311,6 +321,33 @@ def test_text_summarize_remote_backend(monkeypatch) -> None:
         thread.join(timeout=5)
 
 
+def test_text_summarize_remote_backend_non_utf8(monkeypatch) -> None:
+    class Handler(BaseHTTPRequestHandler):
+        def do_POST(self) -> None:  # noqa: N802
+            body = b"\x80\x81"
+            self.send_response(200)
+            self.send_header("Content-Type", "application/json")
+            self.send_header("Content-Length", str(len(body)))
+            self.end_headers()
+            self.wfile.write(body)
+
+        def log_message(self, format: str, *args: object) -> None:  # noqa: A003
+            return
+
+    server = ThreadingHTTPServer(("127.0.0.1", 0), Handler)
+    thread = threading.Thread(target=server.serve_forever, daemon=True)
+    thread.start()
+    try:
+        monkeypatch.setenv("FUSION_TEXT_SUMMARIZER_URL", f"http://127.0.0.1:{server.server_port}/summarize")
+        result = _call("text_summarize", {"text": "hello world", "backend": "remote"})
+        assert isinstance(result, dict)
+        assert "error" in result
+    finally:
+        server.shutdown()
+        server.server_close()
+        thread.join(timeout=5)
+
+
 def test_text_summarize_auto_prefers_remote(monkeypatch) -> None:
     class Handler(BaseHTTPRequestHandler):
         def do_POST(self) -> None:  # noqa: N802
@@ -346,6 +383,7 @@ def test_apply_text_patch_replace_and_insert(tmp_path: Path) -> None:
         "apply_text_patch",
         {
             "path": str(target),
+            "workspace_root": str(tmp_path),
             "edits": [
                 {"start_line": 2, "end_line": 2, "content": "beta-updated"},
                 {"start_line": 4, "end_line": 3, "content": "delta"},
@@ -359,7 +397,14 @@ def test_apply_text_patch_replace_and_insert(tmp_path: Path) -> None:
 
 
 def test_apply_text_patch_guardrails(tmp_path: Path) -> None:
-    missing = _call("apply_text_patch", {"path": str(tmp_path / "missing.txt"), "edits": [{"start_line": 1, "end_line": 0, "content": "x"}]})
+    missing = _call(
+        "apply_text_patch",
+        {
+            "path": str(tmp_path / "missing.txt"),
+            "workspace_root": str(tmp_path),
+            "edits": [{"start_line": 1, "end_line": 0, "content": "x"}],
+        },
+    )
     assert isinstance(missing, dict)
     assert "error" in missing
 
@@ -369,6 +414,7 @@ def test_apply_text_patch_guardrails(tmp_path: Path) -> None:
         "apply_text_patch",
         {
             "path": str(target),
+            "workspace_root": str(tmp_path),
             "edits": [{"start_line": 1, "end_line": 1, "content": "ONE"}],
             "expected_hash": "bad-hash",
         },
@@ -380,6 +426,7 @@ def test_apply_text_patch_guardrails(tmp_path: Path) -> None:
         "apply_text_patch",
         {
             "path": str(target),
+            "workspace_root": str(tmp_path),
             "edits": [
                 {"start_line": 1, "end_line": 2, "content": "merged"},
                 {"start_line": 2, "end_line": 2, "content": "two"},
@@ -398,6 +445,7 @@ def test_apply_text_patch_dry_run_and_create(tmp_path: Path) -> None:
         "apply_text_patch",
         {
             "path": str(target),
+            "workspace_root": str(tmp_path),
             "edits": [{"start_line": 2, "end_line": 2, "content": "BETA"}],
             "dry_run": True,
         },
@@ -412,6 +460,7 @@ def test_apply_text_patch_dry_run_and_create(tmp_path: Path) -> None:
         "apply_text_patch",
         {
             "path": str(created),
+            "workspace_root": str(tmp_path),
             "create": True,
             "edits": [{"start_line": 1, "end_line": 0, "content": "first line"}],
         },
@@ -428,6 +477,7 @@ def test_apply_text_patch_operation_modes(tmp_path: Path) -> None:
         "apply_text_patch",
         {
             "path": str(target),
+            "workspace_root": str(tmp_path),
             "edits": [
                 {"op": "insert_before", "line": 1, "content": "zero"},
                 {"op": "delete", "start_line": 2, "end_line": 2},
@@ -451,6 +501,7 @@ def test_apply_text_patch_conflict_details(tmp_path: Path) -> None:
         "apply_text_patch",
         {
             "path": str(target),
+            "workspace_root": str(tmp_path),
             "edits": [
                 {"op": "replace", "start_line": 1, "end_line": 2, "content": "ab"},
                 {"op": "insert_before", "line": 2, "content": "x"},
@@ -497,6 +548,20 @@ def test_apply_text_patch_workspace_root_policy(tmp_path: Path) -> None:
     details = denied.get("details", {})
     assert isinstance(details, dict)
     assert details.get("type") == "path-outside-root"
+
+
+def test_apply_text_patch_workspace_root_required(tmp_path: Path) -> None:
+    target = tmp_path / "required.txt"
+    target.write_text("a\n", encoding="utf-8")
+    result = _call(
+        "apply_text_patch",
+        {"path": str(target), "edits": [{"start_line": 1, "end_line": 1, "content": "A"}]},
+    )
+    assert isinstance(result, dict)
+    assert "error" in result
+    details = result.get("details", {})
+    assert isinstance(details, dict)
+    assert details.get("type") == "workspace-root-required"
 
 
 def test_symbol_search_python_symbols(tmp_path: Path) -> None:
