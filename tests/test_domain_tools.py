@@ -544,6 +544,21 @@ def test_apply_text_patch_dry_run_and_create(tmp_path: Path) -> None:
     assert "error" not in created_result
     assert created.read_text(encoding="utf-8") == "first line"
 
+    empty_created = tmp_path / "empty.txt"
+    empty_result = _call(
+        "apply_text_patch",
+        {
+            "path": str(empty_created),
+            "workspace_root": str(tmp_path),
+            "create": True,
+            "edits": [{"op": "insert_before", "line": 1, "content": ""}],
+        },
+    )
+    assert isinstance(empty_result, dict)
+    assert "error" not in empty_result
+    assert empty_created.exists()
+    assert empty_created.read_text(encoding="utf-8") == ""
+
 
 def test_apply_text_patch_operation_modes(tmp_path: Path) -> None:
     target = tmp_path / "ops.txt"
@@ -971,3 +986,63 @@ def test_symbol_search_callgraph(tmp_path: Path) -> None:
     js_main_graph = js_main_target.get("callgraph", {})
     assert isinstance(js_main_graph, dict)
     assert any(item.get("symbol") == "api" for item in js_main_graph.get("callees", []) if isinstance(item, dict))
+
+    js_quirks = tmp_path / "quirks.js"
+    js_quirks.write_text(
+        "\n".join(
+            [
+                'function outer() { const msg = "use { brace }"; return msg; }',
+                "const topLevel = helper();",
+                "function helper() { return 1; }",
+            ]
+        ),
+        encoding="utf-8",
+    )
+    quirks_result = _call(
+        "symbol_search",
+        {
+            "paths": [str(js_quirks)],
+            "query": "helper",
+            "kinds": ["function"],
+            "include_callgraph": True,
+        },
+    )
+    assert isinstance(quirks_result, dict)
+    quirks_rows = quirks_result.get("results", [])
+    assert isinstance(quirks_rows, list)
+    quirks_target = next((row for row in quirks_rows if isinstance(row, dict) and row.get("symbol") == "helper"), None)
+    assert isinstance(quirks_target, dict)
+    quirks_graph = quirks_target.get("callgraph", {})
+    assert isinstance(quirks_graph, dict)
+    assert "<module>" in quirks_graph.get("callers", [])
+
+    js_regex = tmp_path / "regex.js"
+    js_regex.write_text(
+        "\n".join(
+            [
+                "function compute() {",
+                "  const r = /pattern}/;",
+                "  return helper();",
+                "}",
+                "function helper() { return 1; }",
+            ]
+        ),
+        encoding="utf-8",
+    )
+    regex_result = _call(
+        "symbol_search",
+        {
+            "paths": [str(js_regex)],
+            "query": "compute",
+            "kinds": ["function"],
+            "include_callgraph": True,
+        },
+    )
+    assert isinstance(regex_result, dict)
+    regex_rows = regex_result.get("results", [])
+    assert isinstance(regex_rows, list)
+    regex_target = next((row for row in regex_rows if isinstance(row, dict) and row.get("symbol") == "compute"), None)
+    assert isinstance(regex_target, dict)
+    regex_graph = regex_target.get("callgraph", {})
+    assert isinstance(regex_graph, dict)
+    assert any(item.get("symbol") == "helper" for item in regex_graph.get("callees", []) if isinstance(item, dict))

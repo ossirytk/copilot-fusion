@@ -6,7 +6,7 @@ import hashlib
 import json
 import os
 import re
-from collections import Counter, deque
+from collections import Counter, OrderedDict, deque
 from pathlib import Path
 from statistics import mean
 from typing import Any
@@ -28,7 +28,8 @@ except ModuleNotFoundError:  # pragma: no cover
 
 
 _REQUESTS = Counter()
-_FILE_LINE_CACHE: dict[Path, tuple[int, int, list[str]]] = {}
+_FILE_LINE_CACHE: OrderedDict[Path, tuple[int, int, list[str]]] = OrderedDict()
+_FILE_LINE_CACHE_MAXSIZE = 512
 _DEFAULT_SIGNAL_RE = re.compile(
     r"\b(error|warn|warning|fail|failed|exception|traceback|fatal|panic|timeout)\b", re.IGNORECASE
 )
@@ -164,6 +165,76 @@ def _extract_entities(text: str, max_per_type: int = 5) -> list[dict[str, object
     return entities
 
 
+def _strip_js_literal_noise(line: str) -> str:
+    result: list[str] = []
+    in_single = False
+    in_double = False
+    in_template = False
+    in_regex = False
+    escaped = False
+    prev_sig = ""
+    i = 0
+    while i < len(line):
+        ch = line[i]
+        if in_single:
+            result.append(" ")
+            if escaped:
+                escaped = False
+            elif ch == "\\":
+                escaped = True
+            elif ch == "'":
+                in_single = False
+        elif in_double:
+            result.append(" ")
+            if escaped:
+                escaped = False
+            elif ch == "\\":
+                escaped = True
+            elif ch == '"':
+                in_double = False
+        elif in_template:
+            result.append(" ")
+            if escaped:
+                escaped = False
+            elif ch == "\\":
+                escaped = True
+            elif ch == "`":
+                in_template = False
+        elif in_regex:
+            result.append(" ")
+            if escaped:
+                escaped = False
+            elif ch == "\\":
+                escaped = True
+            elif ch == "/":
+                in_regex = False
+        else:
+            if ch == "/" and i + 1 < len(line) and line[i + 1] == "/":
+                break
+            if ch == "'":
+                in_single = True
+                result.append(" ")
+            elif ch == '"':
+                in_double = True
+                result.append(" ")
+            elif ch == "`":
+                in_template = True
+                result.append(" ")
+            elif ch == "/":
+                if prev_sig == "" or prev_sig in "([{:;=,!?&|^~<>+-*%":
+                    in_regex = True
+                    result.append(" ")
+                else:
+                    result.append(ch)
+                    prev_sig = ch
+            else:
+                result.append(ch)
+                if not ch.isspace():
+                    prev_sig = ch
+        i += 1
+    return "".join(result)
+
+
 def _read_cached_lines(path: Path) -> list[str] | None:
     try:
         stat = path.stat()
@@ -172,11 +243,14 @@ def _read_cached_lines(path: Path) -> list[str] | None:
     cache_key = (stat.st_mtime_ns, stat.st_size)
     cached = _FILE_LINE_CACHE.get(path)
     if cached and cached[0] == cache_key[0] and cached[1] == cache_key[1]:
+        _FILE_LINE_CACHE.move_to_end(path)
         return cached[2]
     try:
         lines = path.read_text(encoding="utf-8").splitlines()
     except (OSError, UnicodeDecodeError):
         return None
+    if path not in _FILE_LINE_CACHE and len(_FILE_LINE_CACHE) >= _FILE_LINE_CACHE_MAXSIZE:
+        _FILE_LINE_CACHE.popitem(last=False)
     _FILE_LINE_CACHE[path] = (cache_key[0], cache_key[1], lines)
     return lines
 
@@ -332,8 +406,9 @@ def _owner_map_for_file(file_lines: list[str], language: str) -> dict[int, str]:
         if match:
             stack_js.append((brace_depth, match.group(1)))
         owners[line_no] = stack_js[-1][1] if stack_js else "<module>"
-        open_count = stripped.count("{")
-        close_count = stripped.count("}")
+        brace_safe_line = _strip_js_literal_noise(stripped)
+        open_count = brace_safe_line.count("{")
+        close_count = brace_safe_line.count("}")
         brace_depth = max(0, brace_depth + open_count - close_count)
     return owners
 
@@ -360,7 +435,7 @@ def _declaration_body_range(file_lines: list[str], language: str, declaration_li
     saw_open = False
     end_line = len(file_lines)
     for line_no in range(declaration_line, len(file_lines) + 1):
-        line = file_lines[line_no - 1]
+        line = _strip_js_literal_noise(file_lines[line_no - 1])
         open_count = line.count("{")
         close_count = line.count("}")
         brace_depth += open_count - close_count
@@ -409,7 +484,8 @@ def _collect_callgraph(
         for line_no, line in enumerate(lines, start=1):
             if str(candidate) == declaration_path and line_no == declaration_line:
                 continue
-            if not call_pattern.search(line):
+            sanitized = _strip_js_literal_noise(line) if language != "python" else line
+            if not call_pattern.search(sanitized):
                 pass
             else:
                 owner = owners.get(line_no, "<module>")
@@ -429,7 +505,7 @@ def _collect_callgraph(
 
             if not (str(candidate) == declaration_path and declaration_body_start <= line_no <= declaration_body_end):
                 continue
-            for match in callee_pattern.finditer(line):
+            for match in callee_pattern.finditer(sanitized):
                 callee = match.group(1)
                 if callee == symbol or callee in _CALL_EXPR_EXCLUDE:
                     continue
@@ -901,7 +977,7 @@ def register(mcp: FastMCP) -> None:
         after_hash = _sha256_text(result_text)
         changed = after_hash != before_hash
 
-        if not dry_run and changed:
+        if not dry_run and (changed or not exists):
             resolved.parent.mkdir(parents=True, exist_ok=True)
             resolved.write_text(result_text, encoding="utf-8")
 
