@@ -1,10 +1,19 @@
 # Text Distillation / Summarization Brainstorm Plan
 
+## Status
+
+- Phase 1 deterministic baseline is implemented as `text_compact`.
+- Phase 2 local extractive summarization backend is implemented as `text_summarize`.
+- Phase 3 optional remote/model-backed summarization is implemented via `FUSION_TEXT_SUMMARIZER_URL`.
+- Optional compaction output is available from `read_file` via `compact=true`.
+
+---
+
 ## Goal
 
 Design a capability that extracts essential signal from large text (error logs, web pages, long docs) with predictable output for Copilot workflows.
 
-This document is **idea-phase only** (no implementation yet).
+This document is the source-of-truth plan for the distillation track.
 
 ---
 
@@ -13,9 +22,11 @@ This document is **idea-phase only** (no implementation yet).
 - Existing relevant tools:
   - `read_file` (bounded reading),
   - `text_search` (literal/regex),
+  - `text_compact` (deterministic compaction),
+  - `text_summarize` (local extractive summarization),
   - `json_select` / `yaml_select` (structured extraction),
-  - no dedicated summarization/compaction/NER tool.
-- Current fused tool surface: **50 tools**.
+- no dedicated entity-centric extraction/NER tool yet.
+- Current fused tool surface: **54 tools**.
 - Tool budget appears to have room, but UX clarity still matters.
 
 ---
