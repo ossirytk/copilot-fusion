@@ -174,7 +174,7 @@ def test_text_compact_from_text() -> None:
             "info: startup complete",
             "2026-05-27T14:00:00Z ERROR TimeoutError while calling https://api.example.dev/v1/items",
             "warning: retrying request",
-            "traceback: File \"/srv/app/main.py\", line 42",
+            'traceback: File "/srv/app/main.py", line 42',
         ]
     )
     result = _call("text_compact", {"text": payload, "max_points": 3})

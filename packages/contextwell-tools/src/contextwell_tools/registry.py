@@ -28,7 +28,9 @@ except ModuleNotFoundError:  # pragma: no cover
 
 
 _REQUESTS = Counter()
-_DEFAULT_SIGNAL_RE = re.compile(r"\b(error|warn|warning|fail|failed|exception|traceback|fatal|panic|timeout)\b", re.IGNORECASE)
+_DEFAULT_SIGNAL_RE = re.compile(
+    r"\b(error|warn|warning|fail|failed|exception|traceback|fatal|panic|timeout)\b", re.IGNORECASE
+)
 _STACK_RE = re.compile(r"(^\s+at\s+\S)|(^\s*caused by:)|(\bFile \".*\", line \d+\b)", re.IGNORECASE)
 _URL_RE = re.compile(r"https?://[^\s]+", re.IGNORECASE)
 _PATH_RE = re.compile(r"(/[\w.\-]+(?:/[\w.\-]+)+)")
@@ -144,7 +146,7 @@ def _remote_text_summary(text: str, max_sentences: int, endpoint: str, token: st
 
     return {
         "summary": summary,
-        "bullets": [str(item) for item in bullets[:max(1, max_sentences)]],
+        "bullets": [str(item) for item in bullets[: max(1, max_sentences)]],
         "stats": stats,
         "backend": "remote",
     }
@@ -475,7 +477,9 @@ def register(mcp: FastMCP) -> None:
             candidates.append({"line": line_no, "text": line, "score": score, "reasons": reasons})
 
         if not candidates:
-            fallback = [{"line": i + 1, "text": ln.strip(), "score": 0, "reasons": ["fallback"]} for i, ln in enumerate(lines)]
+            fallback = [
+                {"line": i + 1, "text": ln.strip(), "score": 0, "reasons": ["fallback"]} for i, ln in enumerate(lines)
+            ]
             candidates = [c for c in fallback if c["text"]]
 
         ranked = sorted(candidates, key=lambda item: (int(item["score"]), -int(item["line"])), reverse=True)
@@ -502,7 +506,9 @@ def register(mcp: FastMCP) -> None:
 
         bullets = [entry["text"] for entry in selected[: min(5, len(selected))]]
         avg_score = mean([int(item["score"]) for item in candidates]) if candidates else 0.0
-        summary = f"Selected {len(selected)} high-signal lines from {len(lines)} input lines (avg score {avg_score:.2f})."
+        summary = (
+            f"Selected {len(selected)} high-signal lines from {len(lines)} input lines (avg score {avg_score:.2f})."
+        )
         return {
             "summary": summary,
             "bullets": bullets,
@@ -542,7 +548,9 @@ def register(mcp: FastMCP) -> None:
         if backend == "remote":
             if not remote_endpoint:
                 return {"error": "FUSION_TEXT_SUMMARIZER_URL must be set for backend=remote."}
-            return _remote_text_summary(source_text, max_sentences=max_sentences, endpoint=remote_endpoint, token=remote_token)
+            return _remote_text_summary(
+                source_text, max_sentences=max_sentences, endpoint=remote_endpoint, token=remote_token
+            )
 
         if backend == "auto" and remote_endpoint:
             remote_result = _remote_text_summary(
@@ -807,7 +815,9 @@ def register(mcp: FastMCP) -> None:
                     continue
                 file_cache[candidate] = file_lines
             for line_no, line in enumerate(file_lines, start=1):
-                symbol_kind, symbol_name = _match_symbol_from_line(line, language=language, selected_kinds=selected_kinds)
+                symbol_kind, symbol_name = _match_symbol_from_line(
+                    line, language=language, selected_kinds=selected_kinds
+                )
                 if not symbol_kind:
                     continue
                 if q and q not in symbol_name.lower():
@@ -851,9 +861,7 @@ def register(mcp: FastMCP) -> None:
                         max_items=max(1, max_callgraph_edges),
                         file_cache=file_cache,
                     )
-                results.append(
-                    item
-                )
+                results.append(item)
                 if len(results) >= max(1, max_results):
                     return {"results": results, "truncated": True}
         return {"results": results, "truncated": False}
@@ -891,9 +899,7 @@ def register(mcp: FastMCP) -> None:
             "bytes_read": len(data),
         }
         if compact:
-            compact_result = text_compact(
-                text=result["content"], mode=compact_mode, max_points=compact_max_points
-            )
+            compact_result = text_compact(text=result["content"], mode=compact_mode, max_points=compact_max_points)
             result["compact"] = compact_result
         return result
 
