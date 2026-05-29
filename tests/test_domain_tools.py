@@ -505,6 +505,9 @@ def test_apply_text_patch_dry_run_and_create(tmp_path: Path) -> None:
     assert isinstance(dry, dict)
     assert "error" not in dry
     assert dry.get("changed") is True
+    preview = dry.get("preview", {})
+    assert isinstance(preview, dict)
+    assert preview.get("result", {}).get("content") == "alpha\nBETA\n"
     assert target.read_text(encoding="utf-8") == "alpha\nbeta\n"
 
     created = tmp_path / "created.txt"

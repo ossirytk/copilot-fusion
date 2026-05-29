@@ -5,6 +5,7 @@
 - Phase 1 guarded patch editing is implemented as `apply_text_patch`.
 - Phase 2 richer operations and conflict diagnostics are implemented in `apply_text_patch`.
 - Workspace-boundary policy control is implemented via `workspace_root` in `apply_text_patch`.
+- Structured preview responses are implemented for dry runs and previewable batches.
 - Advanced patch semantics remain follow-up work.
 
 ---

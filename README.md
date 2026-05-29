@@ -94,7 +94,7 @@ Use `mcp-config.optional.example.json` as a template when you want fusion + opti
 The next feature tracks are being implemented one at a time:
 
 - text distillation / compaction (phase 1 `text_compact`, phase 2 local extractive `text_summarize`, phase 3 remote/model-backed `text_summarize` via `FUSION_TEXT_SUMMARIZER_URL`, and optional `read_file` compact mode are implemented)
-- safe file editing (phase 1 guarded `apply_text_patch` + phase 2 richer edit ops/diagnostics are implemented)
+- safe file editing (phase 1 guarded `apply_text_patch` + phase 2 richer edit ops/diagnostics + structured previews are implemented)
 - code navigation / symbol awareness (phase 1 Python + phase 2 JS/TS coverage, callsite references, and lightweight callgraph extraction in `symbol_search` are implemented)
 
 See `plans/README.md` for the implementation plan files.

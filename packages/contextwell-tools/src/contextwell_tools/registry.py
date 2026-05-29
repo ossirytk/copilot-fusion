@@ -78,6 +78,16 @@ def _sha256_text(text: str) -> str:
     return hashlib.sha256(text.encode("utf-8")).hexdigest()
 
 
+def _slice_lines(lines: list[str], start_line: int, end_line: int) -> str:
+    if not lines or end_line < start_line:
+        return ""
+    start_idx = max(0, start_line - 1)
+    end_idx = min(len(lines), end_line)
+    if start_idx >= end_idx:
+        return ""
+    return "\n".join(lines[start_idx:end_idx])
+
+
 def _extractive_summary(text: str, max_sentences: int) -> tuple[str, list[str], dict[str, object]]:
     normalized = re.sub(r"\s+", " ", text).strip()
     if not normalized:
@@ -577,6 +587,7 @@ def register(mcp: FastMCP) -> None:
         path: str,
         edits: list[dict[str, object]],
         dry_run: bool = False,
+        include_preview: bool = False,
         create: bool = False,
         expected_hash: str = "",
         workspace_root: str = "",
@@ -623,6 +634,7 @@ def register(mcp: FastMCP) -> None:
         lines = original_text.splitlines()
         has_trailing_newline = original_text.endswith("\n")
         parsed_edits: list[dict[str, object]] = []
+        preview_edits: list[dict[str, object]] = []
         allowed_ops = {"replace", "delete", "insert_before", "insert_after"}
 
         for idx, edit in enumerate(edits, start=1):
@@ -673,6 +685,27 @@ def register(mcp: FastMCP) -> None:
                     "replacement": replacement,
                 }
             )
+            if dry_run or include_preview:
+                before_content = _slice_lines(lines, start_line, end_line)
+                after_content = "\n".join(replacement)
+                preview_edits.append(
+                    {
+                        "index": idx,
+                        "op": op,
+                        "target": {
+                            "start_line": start_line,
+                            "end_line": end_line,
+                        },
+                        "before": {
+                            "content": before_content,
+                            "line_count": 0 if not before_content else before_content.count("\n") + 1,
+                        },
+                        "after": {
+                            "content": after_content,
+                            "line_count": 0 if not after_content else after_content.count("\n") + 1,
+                        },
+                    }
+                )
 
         # Validate conflicts against original coordinates.
         consumed_ranges: list[tuple[int, int, int]] = []
@@ -743,7 +776,7 @@ def register(mcp: FastMCP) -> None:
             resolved.parent.mkdir(parents=True, exist_ok=True)
             resolved.write_text(result_text, encoding="utf-8")
 
-        return {
+        result = {
             "path": str(resolved),
             "applied": len(parsed_edits),
             "changed": changed,
@@ -764,6 +797,15 @@ def register(mcp: FastMCP) -> None:
                 for edit in parsed_edits
             ],
         }
+        if dry_run or include_preview:
+            result["preview"] = {
+                "edits": preview_edits,
+                "result": {
+                    "content": result_text,
+                    "line_count": len(updated_lines),
+                },
+            }
+        return result
 
     @mcp.tool
     def symbol_search(

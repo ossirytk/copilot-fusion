@@ -16,7 +16,7 @@ The merged baseline now covers the first pass of the original roadmap:
 
 ### Safe editing
 
-- Add structured preview responses for complex edit batches.
+- Structured preview responses for dry runs and edit batches are implemented.
 - Consider advanced semantics for larger, multi-file edit intents.
 - Add policy templates for common workspace layouts if needed.
 
