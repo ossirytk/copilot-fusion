@@ -267,6 +267,26 @@ def test_text_summarize_from_text_and_path(tmp_path: Path) -> None:
     assert "error" not in from_path
 
 
+def test_text_summarize_entity_extraction() -> None:
+    text = "\n".join(
+        [
+            "2026-05-29T18:59:16Z ERROR TimeoutError while calling https://api.example.dev/v1/items",
+            'Traceback: File "/srv/app/main.py", line 41',
+            "Retrying /srv/app/config.yaml after failure",
+        ]
+    )
+    result = _call(
+        "text_summarize",
+        {"text": text, "backend": "extractive", "include_entities": True, "max_entities": 4},
+    )
+    assert isinstance(result, dict)
+    entities = result.get("entities", [])
+    assert isinstance(entities, list)
+    assert any(item.get("type") == "url" for item in entities if isinstance(item, dict))
+    assert any(item.get("type") == "path" for item in entities if isinstance(item, dict))
+    assert any(item.get("type") == "timestamp" for item in entities if isinstance(item, dict))
+
+
 def test_text_summarize_invalid_inputs() -> None:
     empty = _call("text_summarize", {})
     assert isinstance(empty, dict)
@@ -619,6 +639,38 @@ def test_apply_text_patch_workspace_root_required(tmp_path: Path) -> None:
     assert details.get("type") == "workspace-root-required"
 
 
+def test_apply_text_patch_batch(tmp_path: Path) -> None:
+    root = tmp_path / "workspace"
+    root.mkdir()
+    first = root / "first.txt"
+    first.write_text("alpha\nbeta\n", encoding="utf-8")
+    second = root / "second.txt"
+    second.write_text("one\ntwo\n", encoding="utf-8")
+
+    result = _call(
+        "apply_text_patch_batch",
+        {
+            "workspace_root": str(root),
+            "patches": [
+                {
+                    "path": str(first),
+                    "edits": [{"start_line": 2, "end_line": 2, "content": "BETA"}],
+                },
+                {
+                    "path": str(second),
+                    "edits": [{"start_line": 1, "end_line": 1, "content": "ONE"}],
+                },
+            ],
+        },
+    )
+    assert isinstance(result, dict)
+    assert "error" not in result
+    assert result.get("applied") == 2
+    assert result.get("changed") == 2
+    assert first.read_text(encoding="utf-8") == "alpha\nBETA\n"
+    assert second.read_text(encoding="utf-8") == "ONE\ntwo\n"
+
+
 def test_symbol_search_python_symbols(tmp_path: Path) -> None:
     target = tmp_path / "module.py"
     target.write_text(
@@ -673,6 +725,21 @@ def test_symbol_search_truncation(tmp_path: Path) -> None:
     assert len(result.get("results", [])) == 2
 
 
+def test_symbol_search_cache_invalidation(tmp_path: Path) -> None:
+    target = tmp_path / "cached.py"
+    target.write_text("def alpha():\n    return 1\n", encoding="utf-8")
+
+    first = _call("symbol_search", {"paths": [str(target)], "query": "alpha", "kinds": ["function"]})
+    assert isinstance(first, dict)
+    assert any(item.get("symbol") == "alpha" for item in first.get("results", []) if isinstance(item, dict))
+
+    target.write_text("def beta():\n    return 2\n", encoding="utf-8")
+
+    second = _call("symbol_search", {"paths": [str(target)], "query": "beta", "kinds": ["function"]})
+    assert isinstance(second, dict)
+    assert any(item.get("symbol") == "beta" for item in second.get("results", []) if isinstance(item, dict))
+
+
 def test_symbol_search_javascript_and_typescript(tmp_path: Path) -> None:
     js_file = tmp_path / "mod.js"
     js_file.write_text(
@@ -681,6 +748,16 @@ def test_symbol_search_javascript_and_typescript(tmp_path: Path) -> None:
                 "export function buildClient() { return {}; }",
                 "export class Worker {}",
                 "const timeoutMs = 1000",
+            ]
+        ),
+        encoding="utf-8",
+    )
+    jsx_file = tmp_path / "view.jsx"
+    jsx_file.write_text(
+        "\n".join(
+            [
+                "export function RenderView() { return <div />; }",
+                "export const jsxValue = 1;",
             ]
         ),
         encoding="utf-8",
@@ -695,6 +772,16 @@ def test_symbol_search_javascript_and_typescript(tmp_path: Path) -> None:
         ),
         encoding="utf-8",
     )
+    tsx_file = tmp_path / "panel.tsx"
+    tsx_file.write_text(
+        "\n".join(
+            [
+                "export function RenderPanel() { return <section />; }",
+                "const tsxValue = 2;",
+            ]
+        ),
+        encoding="utf-8",
+    )
 
     result = _call("symbol_search", {"paths": [str(tmp_path)], "query": "task"})
     assert isinstance(result, dict)
@@ -703,6 +790,13 @@ def test_symbol_search_javascript_and_typescript(tmp_path: Path) -> None:
     assert isinstance(rows, list)
     assert any(item.get("symbol") == "runTask" for item in rows if isinstance(item, dict))
     assert any(item.get("language") == "typescript" for item in rows if isinstance(item, dict))
+
+    jsx_result = _call("symbol_search", {"paths": [str(tmp_path)], "query": "render"})
+    assert isinstance(jsx_result, dict)
+    jsx_rows = jsx_result.get("results", [])
+    assert isinstance(jsx_rows, list)
+    assert any(item.get("symbol") == "RenderView" for item in jsx_rows if isinstance(item, dict))
+    assert any(item.get("symbol") == "RenderPanel" for item in jsx_rows if isinstance(item, dict))
 
 
 def test_symbol_search_references_and_metadata(tmp_path: Path) -> None:
@@ -824,6 +918,24 @@ def test_symbol_search_callgraph(tmp_path: Path) -> None:
     assert isinstance(py_graph, dict)
     assert "run" in py_graph.get("callers", [])
 
+    py_run_result = _call(
+        "symbol_search",
+        {
+            "paths": [str(tmp_path)],
+            "query": "run",
+            "kinds": ["function"],
+            "include_callgraph": True,
+        },
+    )
+    assert isinstance(py_run_result, dict)
+    py_run_rows = py_run_result.get("results", [])
+    assert isinstance(py_run_rows, list)
+    py_run_target = next((row for row in py_run_rows if isinstance(row, dict) and row.get("symbol") == "run"), None)
+    assert isinstance(py_run_target, dict)
+    py_run_graph = py_run_target.get("callgraph", {})
+    assert isinstance(py_run_graph, dict)
+    assert any(item.get("symbol") == "helper" for item in py_run_graph.get("callees", []) if isinstance(item, dict))
+
     js_result = _call(
         "symbol_search",
         {
@@ -841,3 +953,21 @@ def test_symbol_search_callgraph(tmp_path: Path) -> None:
     js_graph = js_target.get("callgraph", {})
     assert isinstance(js_graph, dict)
     assert "main" in js_graph.get("callers", [])
+
+    js_main_result = _call(
+        "symbol_search",
+        {
+            "paths": [str(tmp_path)],
+            "query": "main",
+            "kinds": ["function"],
+            "include_callgraph": True,
+        },
+    )
+    assert isinstance(js_main_result, dict)
+    js_main_rows = js_main_result.get("results", [])
+    assert isinstance(js_main_rows, list)
+    js_main_target = next((row for row in js_main_rows if isinstance(row, dict) and row.get("symbol") == "main"), None)
+    assert isinstance(js_main_target, dict)
+    js_main_graph = js_main_target.get("callgraph", {})
+    assert isinstance(js_main_graph, dict)
+    assert any(item.get("symbol") == "api" for item in js_main_graph.get("callees", []) if isinstance(item, dict))

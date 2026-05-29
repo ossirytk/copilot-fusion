@@ -6,6 +6,7 @@
 - Phase 2 richer operations and conflict diagnostics are implemented in `apply_text_patch`.
 - Workspace-boundary policy control is implemented via `workspace_root` in `apply_text_patch`.
 - Structured preview responses are implemented for dry runs and previewable batches.
+- Multi-file batch editing is implemented via `apply_text_patch_batch`.
 - Advanced patch semantics remain follow-up work.
 
 ---

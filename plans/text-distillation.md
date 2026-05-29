@@ -6,6 +6,7 @@
 - Phase 2 local extractive summarization backend is implemented as `text_summarize`.
 - Phase 3 optional remote/model-backed summarization is implemented via `FUSION_TEXT_SUMMARIZER_URL`.
 - Optional compaction output is available from `read_file` via `compact=true`.
+- Optional entity extraction is available from `text_summarize` via `include_entities=true`.
 
 ---
 
@@ -25,7 +26,7 @@ This document is the source-of-truth plan for the distillation track.
   - `text_compact` (deterministic compaction),
   - `text_summarize` (local extractive summarization),
   - `json_select` / `yaml_select` (structured extraction),
-- no dedicated entity-centric extraction/NER tool yet.
+  - optional entity extraction for URLs, paths, timestamps, and class-like tokens.
 - Current fused tool surface: **54 tools**.
 - Tool budget appears to have room, but UX clarity still matters.
 

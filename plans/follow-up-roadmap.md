@@ -12,19 +12,20 @@ The merged baseline now covers the first pass of the original roadmap:
 
 - Add comparative quality checks on representative corpora.
 - Add guidance for when to use `read_file(compact=true)` vs `text_compact` (drafted in `plans/text-distillation.md`).
-- Consider optional model-backed NER/entity extraction.
+- Consider optional model-backed NER/entity extraction beyond the current deterministic entity surfacing.
 
 ### Safe editing
 
 - Structured preview responses for dry runs and edit batches are implemented.
+- Multi-file batch editing is implemented.
 - Consider advanced semantics for larger, multi-file edit intents.
 - Add policy templates for common workspace layouts if needed.
 
 ### Code navigation
 
-- Improve precision/depth of callgraph extraction.
-- Expand language-aware parsing beyond the current lightweight heuristics.
-- Evaluate indexing/caching if large-repo performance becomes an issue.
+- Callgraph extraction now includes caller and callee sites.
+- Language-aware parsing now includes common JS/TS variant files like JSX/TSX.
+- Mtime-based file caching is implemented for repeated symbol lookups.
 
 ## Planning approach
 
