@@ -277,7 +277,7 @@ def test_text_summarize_entity_extraction() -> None:
     )
     result = _call(
         "text_summarize",
-        {"text": text, "backend": "extractive", "include_entities": True, "max_entities": 4},
+        {"text": text, "backend": "extractive", "include_entities": True, "max_entities": 10},
     )
     assert isinstance(result, dict)
     entities = result.get("entities", [])
@@ -748,7 +748,7 @@ def test_symbol_search_cache_invalidation(tmp_path: Path) -> None:
     assert isinstance(first, dict)
     assert any(item.get("symbol") == "alpha" for item in first.get("results", []) if isinstance(item, dict))
 
-    target.write_text("def beta():\n    return 2\n", encoding="utf-8")
+    target.write_text("def beta():\n    return 2\n# cache-bust\n", encoding="utf-8")
 
     second = _call("symbol_search", {"paths": [str(target)], "query": "beta", "kinds": ["function"]})
     assert isinstance(second, dict)

@@ -47,6 +47,7 @@ _JS_CLASS_RE = re.compile(r"^\s*(?:export\s+)?class\s+([A-Za-z_$]\w*)\b")
 _JS_VARIABLE_RE = re.compile(r"^\s*(?:export\s+)?(?:const|let|var)\s+([A-Za-z_$]\w*)\s*=")
 _JS_ARROW_FN_RE = re.compile(r"^\s*(?:export\s+)?(?:const|let|var)\s+([A-Za-z_$]\w*)\s*=\s*(?:async\s*)?\(?.*\)?\s*=>")
 _CALL_EXPR_RE = re.compile(r"(?:^|[^A-Za-z0-9_$])((?:[A-Za-z_$][\w$]*\.)*[A-Za-z_$][\w$]*)\s*\(")
+_DECL_PREFIX_RE = re.compile(r"(?:def|function|class)\s+$")
 _CALL_EXPR_EXCLUDE = {
     "await",
     "catch",
@@ -142,7 +143,7 @@ def _extractive_summary(text: str, max_sentences: int) -> tuple[str, list[str], 
     return summary, ordered, stats
 
 
-def _extract_entities(text: str, max_per_type: int = 5) -> list[dict[str, object]]:
+def _extract_entities(text: str, max_per_type: int = 5, max_total: int | None = None) -> list[dict[str, object]]:
     entity_hits: dict[str, Counter[str]] = {
         "url": Counter(),
         "path": Counter(),
@@ -162,6 +163,9 @@ def _extract_entities(text: str, max_per_type: int = 5) -> list[dict[str, object
     entities: list[dict[str, object]] = []
     for kind, counts in entity_hits.items():
         entities.extend([{"type": kind, "value": value, "count": count} for value, count in counts.most_common(max_per_type)])
+    if max_total is not None:
+        entities.sort(key=lambda e: int(e["count"]), reverse=True)
+        entities = entities[:max_total]
     return entities
 
 
@@ -509,6 +513,8 @@ def _collect_callgraph(
                 callee = match.group(1)
                 if callee == symbol or callee in _CALL_EXPR_EXCLUDE:
                     continue
+                if _DECL_PREFIX_RE.search(sanitized[: match.start(1)]):
+                    continue
                 callee_counts[callee] += 1
                 if len(callee_sites) < max_items:
                     callee_sites.append(
@@ -782,7 +788,7 @@ def register(mcp: FastMCP) -> None:
             },
         }
         if include_entities:
-            entities = _extract_entities(source_text, max_per_type=max(1, max_entities))
+            entities = _extract_entities(source_text, max_per_type=max(1, max_entities), max_total=max_entities)
             result["entities"] = entities
             result["stats"]["entity_count"] = len(entities)
         return result
@@ -975,11 +981,12 @@ def register(mcp: FastMCP) -> None:
         else:
             result_text = ""
         after_hash = _sha256_text(result_text)
-        changed = after_hash != before_hash
+        changed = after_hash != before_hash or not exists
 
-        if not dry_run and (changed or not exists):
+        if not dry_run and changed:
             resolved.parent.mkdir(parents=True, exist_ok=True)
             resolved.write_text(result_text, encoding="utf-8")
+            _FILE_LINE_CACHE.pop(resolved, None)
 
         result = {
             "path": str(resolved),
@@ -1034,7 +1041,7 @@ def register(mcp: FastMCP) -> None:
             path = str(patch.get("path", "")).strip()
             edits = patch.get("edits", [])
             patch_dry_run = bool(patch.get("dry_run", dry_run))
-            patch_workspace_root = str(patch.get("workspace_root", workspace_root)).strip()
+            patch_workspace_root = workspace_root if workspace_root else str(patch.get("workspace_root", "")).strip()
             result = apply_text_patch(
                 path=path,
                 edits=edits if isinstance(edits, list) else [],
