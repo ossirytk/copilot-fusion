@@ -162,7 +162,9 @@ def _extract_entities(text: str, max_per_type: int = 5, max_total: int | None = 
 
     entities: list[dict[str, object]] = []
     for kind, counts in entity_hits.items():
-        entities.extend([{"type": kind, "value": value, "count": count} for value, count in counts.most_common(max_per_type)])
+        entities.extend(
+            [{"type": kind, "value": value, "count": count} for value, count in counts.most_common(max_per_type)]
+        )
     if max_total is not None:
         entities.sort(key=lambda e: int(e["count"]), reverse=True)
         entities = entities[:max_total]
