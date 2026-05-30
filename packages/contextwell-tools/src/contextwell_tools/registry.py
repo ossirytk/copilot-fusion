@@ -629,6 +629,7 @@ def register(mcp: FastMCP) -> None:
         mode: str = "auto",
         max_points: int = 20,
         max_bytes: int = 200_000,
+        max_entities: int = 10,
         include_patterns: list[str] | None = None,
         exclude_patterns: list[str] | None = None,
     ) -> dict[str, object]:
@@ -716,7 +717,7 @@ def register(mcp: FastMCP) -> None:
                 break
 
         top_patterns = [{"pattern": key, "count": count} for key, count in pattern_hits.most_common(10)]
-        entities = _extract_entities(source_text)
+        entities = _extract_entities(source_text, max_per_type=max(1, max_entities), max_total=max_entities)
 
         bullets = [entry["text"] for entry in selected[: min(5, len(selected))]]
         avg_score = mean([int(item["score"]) for item in candidates]) if candidates else 0.0
