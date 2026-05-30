@@ -1,8 +1,9 @@
 {
-  "servers": {
+  "mcpServers": {
     "copilot-fusion": {
-      "command": "copilot-fusion"
+      "type": "stdio",
+      "command": "copilot-fusion",
+      "tools": ["*"]
     }
   }
 }
-
