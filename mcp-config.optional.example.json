@@ -1,27 +1,36 @@
 {
-  "servers": {
+  "mcpServers": {
     "copilot-fusion": {
-      "command": "copilot-fusion"
+      "type": "stdio",
+      "command": "copilot-fusion",
+      "tools": ["*"]
     },
     "feedpilot": {
+      "type": "stdio",
       "command": "feedpilot"
     },
     "benchpilot": {
+      "type": "stdio",
       "command": "benchpilot"
     },
     "envpilot": {
+      "type": "stdio",
       "command": "envpilot"
     },
     "httppilot": {
+      "type": "stdio",
       "command": "httppilot"
     },
     "shellpilot": {
+      "type": "stdio",
       "command": "shellpilot"
     },
     "snippetpilot": {
+      "type": "stdio",
       "command": "snippetpilot"
     },
     "diffpilot": {
+      "type": "stdio",
       "command": "diffpilot"
     }
   }
