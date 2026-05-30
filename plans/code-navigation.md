@@ -3,11 +3,11 @@
 ## Status
 
 - Phase 1 lightweight Python symbol lookup is implemented as `symbol_search`.
-- Phase 2 JavaScript/TypeScript symbol coverage is implemented in `symbol_search`.
+- Phase 2 JavaScript/TypeScript/JSX/TSX symbol coverage is implemented in `symbol_search`.
 - Richer symbol metadata and optional reference scanning are implemented in `symbol_search`.
 - Optional function callsite-aware reference classification is implemented in `symbol_search`.
-- Lightweight callgraph-level caller/callee site extraction is implemented in `symbol_search`.
-- Heavier indexing-backed callgraph behavior remains follow-up work.
+- Lightweight callgraph-level caller/callee/site extraction is implemented in `symbol_search`.
+- Mtime-based file caching now keeps repeated navigation queries fast across calls.
 
 ---
 

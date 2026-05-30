@@ -6,6 +6,7 @@
 - Phase 2 local extractive summarization backend is implemented as `text_summarize`.
 - Phase 3 optional remote/model-backed summarization is implemented via `FUSION_TEXT_SUMMARIZER_URL`.
 - Optional compaction output is available from `read_file` via `compact=true`.
+- Optional entity extraction is available from `text_summarize` via `include_entities=true`.
 
 ---
 
@@ -25,9 +26,19 @@ This document is the source-of-truth plan for the distillation track.
   - `text_compact` (deterministic compaction),
   - `text_summarize` (local extractive summarization),
   - `json_select` / `yaml_select` (structured extraction),
-- no dedicated entity-centric extraction/NER tool yet.
+  - optional entity extraction for URLs, paths, timestamps, and class-like tokens.
 - Current fused tool surface: **54 tools**.
 - Tool budget appears to have room, but UX clarity still matters.
+
+---
+
+## Usage guidance
+
+- Use `text_compact` when you have noisy text and want deterministic high-signal extraction.
+- Use `read_file(compact=true)` when you already need bounded file content and want compacted signal in one call.
+- Use `text_summarize` when you want a short narrative summary; choose `backend="auto"` when a remote endpoint is configured.
+- Prefer `text_search` for exact token/regex discovery rather than summarization.
+- Keep `text_compact` for logs, trace output, and mixed technical noise where line selection matters.
 
 ---
 

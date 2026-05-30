@@ -267,6 +267,26 @@ def test_text_summarize_from_text_and_path(tmp_path: Path) -> None:
     assert "error" not in from_path
 
 
+def test_text_summarize_entity_extraction() -> None:
+    text = "\n".join(
+        [
+            "2026-05-29T18:59:16Z ERROR TimeoutError while calling https://api.example.dev/v1/items",
+            'Traceback: File "/srv/app/main.py", line 41',
+            "Retrying /srv/app/config.yaml after failure",
+        ]
+    )
+    result = _call(
+        "text_summarize",
+        {"text": text, "backend": "extractive", "include_entities": True, "max_entities": 10},
+    )
+    assert isinstance(result, dict)
+    entities = result.get("entities", [])
+    assert isinstance(entities, list)
+    assert any(item.get("type") == "url" for item in entities if isinstance(item, dict))
+    assert any(item.get("type") == "path" for item in entities if isinstance(item, dict))
+    assert any(item.get("type") == "timestamp" for item in entities if isinstance(item, dict))
+
+
 def test_text_summarize_invalid_inputs() -> None:
     empty = _call("text_summarize", {})
     assert isinstance(empty, dict)
@@ -376,6 +396,58 @@ def test_text_summarize_auto_prefers_remote(monkeypatch) -> None:
         thread.join(timeout=5)
 
 
+def test_text_distillation_quality_checks_on_logs() -> None:
+    corpus = "\n".join(
+        [
+            "INFO boot complete",
+            "INFO polling upstream service",
+            "ERROR TimeoutError while calling https://api.example.dev/v1/items",
+            "Traceback (most recent call last):",
+            '  File "/srv/app/main.py", line 41, in run',
+            "WARN retrying request after timeout",
+            "INFO request succeeded on retry",
+        ]
+    )
+    compact = _call("text_compact", {"text": corpus, "mode": "errors-first", "max_points": 4})
+    summarize = _call("text_summarize", {"text": corpus, "max_sentences": 2})
+
+    assert isinstance(compact, dict)
+    compact_selected = " ".join(
+        str(item.get("text", "")) for item in compact.get("selected", []) if isinstance(item, dict)
+    )
+    assert "TimeoutError" in compact_selected
+    assert "Traceback" in compact_selected
+
+    assert isinstance(summarize, dict)
+    assert "TimeoutError" in str(summarize.get("summary", ""))
+    assert summarize.get("backend") == "local-extractive"
+
+
+def test_text_distillation_quality_checks_on_prose() -> None:
+    corpus = "\n".join(
+        [
+            "The release candidate ships with a smaller bundle and faster startup.",
+            "We are deprecating the legacy migration path in favor of the new workflow.",
+            "This note contains extra background that should be less important.",
+            "The migration guide highlights compatibility and rollout steps.",
+        ]
+    )
+    compact = _call("text_compact", {"text": corpus, "max_points": 3, "include_patterns": ["migration", "release"]})
+    summarize = _call("text_summarize", {"text": corpus, "max_sentences": 2})
+
+    assert isinstance(compact, dict)
+    compact_selected = " ".join(
+        str(item.get("text", "")) for item in compact.get("selected", []) if isinstance(item, dict)
+    ).lower()
+    assert "migration" in compact_selected
+    assert "release" in compact_selected
+
+    assert isinstance(summarize, dict)
+    summary = str(summarize.get("summary", "")).lower()
+    assert "migration" in summary or "release" in summary
+    assert len(summarize.get("bullets", [])) <= 2
+
+
 def test_apply_text_patch_replace_and_insert(tmp_path: Path) -> None:
     target = tmp_path / "sample.txt"
     target.write_text("alpha\nbeta\ngamma\n", encoding="utf-8")
@@ -453,6 +525,9 @@ def test_apply_text_patch_dry_run_and_create(tmp_path: Path) -> None:
     assert isinstance(dry, dict)
     assert "error" not in dry
     assert dry.get("changed") is True
+    preview = dry.get("preview", {})
+    assert isinstance(preview, dict)
+    assert preview.get("result", {}).get("content") == "alpha\nBETA\n"
     assert target.read_text(encoding="utf-8") == "alpha\nbeta\n"
 
     created = tmp_path / "created.txt"
@@ -468,6 +543,21 @@ def test_apply_text_patch_dry_run_and_create(tmp_path: Path) -> None:
     assert isinstance(created_result, dict)
     assert "error" not in created_result
     assert created.read_text(encoding="utf-8") == "first line"
+
+    empty_created = tmp_path / "empty.txt"
+    empty_result = _call(
+        "apply_text_patch",
+        {
+            "path": str(empty_created),
+            "workspace_root": str(tmp_path),
+            "create": True,
+            "edits": [{"op": "insert_before", "line": 1, "content": ""}],
+        },
+    )
+    assert isinstance(empty_result, dict)
+    assert "error" not in empty_result
+    assert empty_created.exists()
+    assert empty_created.read_text(encoding="utf-8") == ""
 
 
 def test_apply_text_patch_operation_modes(tmp_path: Path) -> None:
@@ -564,6 +654,38 @@ def test_apply_text_patch_workspace_root_required(tmp_path: Path) -> None:
     assert details.get("type") == "workspace-root-required"
 
 
+def test_apply_text_patch_batch(tmp_path: Path) -> None:
+    root = tmp_path / "workspace"
+    root.mkdir()
+    first = root / "first.txt"
+    first.write_text("alpha\nbeta\n", encoding="utf-8")
+    second = root / "second.txt"
+    second.write_text("one\ntwo\n", encoding="utf-8")
+
+    result = _call(
+        "apply_text_patch_batch",
+        {
+            "workspace_root": str(root),
+            "patches": [
+                {
+                    "path": str(first),
+                    "edits": [{"start_line": 2, "end_line": 2, "content": "BETA"}],
+                },
+                {
+                    "path": str(second),
+                    "edits": [{"start_line": 1, "end_line": 1, "content": "ONE"}],
+                },
+            ],
+        },
+    )
+    assert isinstance(result, dict)
+    assert "error" not in result
+    assert result.get("applied") == 2
+    assert result.get("changed") == 2
+    assert first.read_text(encoding="utf-8") == "alpha\nBETA\n"
+    assert second.read_text(encoding="utf-8") == "ONE\ntwo\n"
+
+
 def test_symbol_search_python_symbols(tmp_path: Path) -> None:
     target = tmp_path / "module.py"
     target.write_text(
@@ -618,6 +740,21 @@ def test_symbol_search_truncation(tmp_path: Path) -> None:
     assert len(result.get("results", [])) == 2
 
 
+def test_symbol_search_cache_invalidation(tmp_path: Path) -> None:
+    target = tmp_path / "cached.py"
+    target.write_text("def alpha():\n    return 1\n", encoding="utf-8")
+
+    first = _call("symbol_search", {"paths": [str(target)], "query": "alpha", "kinds": ["function"]})
+    assert isinstance(first, dict)
+    assert any(item.get("symbol") == "alpha" for item in first.get("results", []) if isinstance(item, dict))
+
+    target.write_text("def beta():\n    return 2\n# cache-bust\n", encoding="utf-8")
+
+    second = _call("symbol_search", {"paths": [str(target)], "query": "beta", "kinds": ["function"]})
+    assert isinstance(second, dict)
+    assert any(item.get("symbol") == "beta" for item in second.get("results", []) if isinstance(item, dict))
+
+
 def test_symbol_search_javascript_and_typescript(tmp_path: Path) -> None:
     js_file = tmp_path / "mod.js"
     js_file.write_text(
@@ -626,6 +763,16 @@ def test_symbol_search_javascript_and_typescript(tmp_path: Path) -> None:
                 "export function buildClient() { return {}; }",
                 "export class Worker {}",
                 "const timeoutMs = 1000",
+            ]
+        ),
+        encoding="utf-8",
+    )
+    jsx_file = tmp_path / "view.jsx"
+    jsx_file.write_text(
+        "\n".join(
+            [
+                "export function RenderView() { return <div />; }",
+                "export const jsxValue = 1;",
             ]
         ),
         encoding="utf-8",
@@ -640,6 +787,16 @@ def test_symbol_search_javascript_and_typescript(tmp_path: Path) -> None:
         ),
         encoding="utf-8",
     )
+    tsx_file = tmp_path / "panel.tsx"
+    tsx_file.write_text(
+        "\n".join(
+            [
+                "export function RenderPanel() { return <section />; }",
+                "const tsxValue = 2;",
+            ]
+        ),
+        encoding="utf-8",
+    )
 
     result = _call("symbol_search", {"paths": [str(tmp_path)], "query": "task"})
     assert isinstance(result, dict)
@@ -648,6 +805,13 @@ def test_symbol_search_javascript_and_typescript(tmp_path: Path) -> None:
     assert isinstance(rows, list)
     assert any(item.get("symbol") == "runTask" for item in rows if isinstance(item, dict))
     assert any(item.get("language") == "typescript" for item in rows if isinstance(item, dict))
+
+    jsx_result = _call("symbol_search", {"paths": [str(tmp_path)], "query": "render"})
+    assert isinstance(jsx_result, dict)
+    jsx_rows = jsx_result.get("results", [])
+    assert isinstance(jsx_rows, list)
+    assert any(item.get("symbol") == "RenderView" for item in jsx_rows if isinstance(item, dict))
+    assert any(item.get("symbol") == "RenderPanel" for item in jsx_rows if isinstance(item, dict))
 
 
 def test_symbol_search_references_and_metadata(tmp_path: Path) -> None:
@@ -769,6 +933,24 @@ def test_symbol_search_callgraph(tmp_path: Path) -> None:
     assert isinstance(py_graph, dict)
     assert "run" in py_graph.get("callers", [])
 
+    py_run_result = _call(
+        "symbol_search",
+        {
+            "paths": [str(tmp_path)],
+            "query": "run",
+            "kinds": ["function"],
+            "include_callgraph": True,
+        },
+    )
+    assert isinstance(py_run_result, dict)
+    py_run_rows = py_run_result.get("results", [])
+    assert isinstance(py_run_rows, list)
+    py_run_target = next((row for row in py_run_rows if isinstance(row, dict) and row.get("symbol") == "run"), None)
+    assert isinstance(py_run_target, dict)
+    py_run_graph = py_run_target.get("callgraph", {})
+    assert isinstance(py_run_graph, dict)
+    assert any(item.get("symbol") == "helper" for item in py_run_graph.get("callees", []) if isinstance(item, dict))
+
     js_result = _call(
         "symbol_search",
         {
@@ -786,3 +968,81 @@ def test_symbol_search_callgraph(tmp_path: Path) -> None:
     js_graph = js_target.get("callgraph", {})
     assert isinstance(js_graph, dict)
     assert "main" in js_graph.get("callers", [])
+
+    js_main_result = _call(
+        "symbol_search",
+        {
+            "paths": [str(tmp_path)],
+            "query": "main",
+            "kinds": ["function"],
+            "include_callgraph": True,
+        },
+    )
+    assert isinstance(js_main_result, dict)
+    js_main_rows = js_main_result.get("results", [])
+    assert isinstance(js_main_rows, list)
+    js_main_target = next((row for row in js_main_rows if isinstance(row, dict) and row.get("symbol") == "main"), None)
+    assert isinstance(js_main_target, dict)
+    js_main_graph = js_main_target.get("callgraph", {})
+    assert isinstance(js_main_graph, dict)
+    assert any(item.get("symbol") == "api" for item in js_main_graph.get("callees", []) if isinstance(item, dict))
+
+    js_quirks = tmp_path / "quirks.js"
+    js_quirks.write_text(
+        "\n".join(
+            [
+                'function outer() { const msg = "use { brace }"; return msg; }',
+                "const topLevel = helper();",
+                "function helper() { return 1; }",
+            ]
+        ),
+        encoding="utf-8",
+    )
+    quirks_result = _call(
+        "symbol_search",
+        {
+            "paths": [str(js_quirks)],
+            "query": "helper",
+            "kinds": ["function"],
+            "include_callgraph": True,
+        },
+    )
+    assert isinstance(quirks_result, dict)
+    quirks_rows = quirks_result.get("results", [])
+    assert isinstance(quirks_rows, list)
+    quirks_target = next((row for row in quirks_rows if isinstance(row, dict) and row.get("symbol") == "helper"), None)
+    assert isinstance(quirks_target, dict)
+    quirks_graph = quirks_target.get("callgraph", {})
+    assert isinstance(quirks_graph, dict)
+    assert "<module>" in quirks_graph.get("callers", [])
+
+    js_regex = tmp_path / "regex.js"
+    js_regex.write_text(
+        "\n".join(
+            [
+                "function compute() {",
+                "  const r = /pattern}/;",
+                "  return helper();",
+                "}",
+                "function helper() { return 1; }",
+            ]
+        ),
+        encoding="utf-8",
+    )
+    regex_result = _call(
+        "symbol_search",
+        {
+            "paths": [str(js_regex)],
+            "query": "compute",
+            "kinds": ["function"],
+            "include_callgraph": True,
+        },
+    )
+    assert isinstance(regex_result, dict)
+    regex_rows = regex_result.get("results", [])
+    assert isinstance(regex_rows, list)
+    regex_target = next((row for row in regex_rows if isinstance(row, dict) and row.get("symbol") == "compute"), None)
+    assert isinstance(regex_target, dict)
+    regex_graph = regex_target.get("callgraph", {})
+    assert isinstance(regex_graph, dict)
+    assert any(item.get("symbol") == "helper" for item in regex_graph.get("callees", []) if isinstance(item, dict))

@@ -6,7 +6,7 @@ import hashlib
 import json
 import os
 import re
-from collections import Counter, deque
+from collections import Counter, OrderedDict, deque
 from pathlib import Path
 from statistics import mean
 from typing import Any
@@ -28,6 +28,8 @@ except ModuleNotFoundError:  # pragma: no cover
 
 
 _REQUESTS = Counter()
+_FILE_LINE_CACHE: OrderedDict[Path, tuple[int, int, list[str]]] = OrderedDict()
+_FILE_LINE_CACHE_MAXSIZE = 512
 _DEFAULT_SIGNAL_RE = re.compile(
     r"\b(error|warn|warning|fail|failed|exception|traceback|fatal|panic|timeout)\b", re.IGNORECASE
 )
@@ -44,6 +46,27 @@ _JS_FUNCTION_RE = re.compile(r"^\s*(?:export\s+)?(?:async\s+)?function\s+([A-Za-
 _JS_CLASS_RE = re.compile(r"^\s*(?:export\s+)?class\s+([A-Za-z_$]\w*)\b")
 _JS_VARIABLE_RE = re.compile(r"^\s*(?:export\s+)?(?:const|let|var)\s+([A-Za-z_$]\w*)\s*=")
 _JS_ARROW_FN_RE = re.compile(r"^\s*(?:export\s+)?(?:const|let|var)\s+([A-Za-z_$]\w*)\s*=\s*(?:async\s*)?\(?.*\)?\s*=>")
+_CALL_EXPR_RE = re.compile(r"(?:^|[^A-Za-z0-9_$])((?:[A-Za-z_$][\w$]*\.)*[A-Za-z_$][\w$]*)\s*\(")
+_DECL_PREFIX_RE = re.compile(r"(?:def|function|class)\s+$")
+_CALL_EXPR_EXCLUDE = {
+    "await",
+    "catch",
+    "class",
+    "delete",
+    "for",
+    "function",
+    "if",
+    "new",
+    "return",
+    "super",
+    "switch",
+    "this",
+    "throw",
+    "try",
+    "typeof",
+    "while",
+    "yield",
+}
 
 
 def _project(node: Any, field: str) -> Any:
@@ -78,6 +101,16 @@ def _sha256_text(text: str) -> str:
     return hashlib.sha256(text.encode("utf-8")).hexdigest()
 
 
+def _slice_lines(lines: list[str], start_line: int, end_line: int) -> str:
+    if not lines or end_line < start_line:
+        return ""
+    start_idx = max(0, start_line - 1)
+    end_idx = min(len(lines), end_line)
+    if start_idx >= end_idx:
+        return ""
+    return "\n".join(lines[start_idx:end_idx])
+
+
 def _extractive_summary(text: str, max_sentences: int) -> tuple[str, list[str], dict[str, object]]:
     normalized = re.sub(r"\s+", " ", text).strip()
     if not normalized:
@@ -108,6 +141,124 @@ def _extractive_summary(text: str, max_sentences: int) -> tuple[str, list[str], 
         "truncated": len(sentences) > len(ordered),
     }
     return summary, ordered, stats
+
+
+def _extract_entities(text: str, max_per_type: int = 5, max_total: int | None = None) -> list[dict[str, object]]:
+    entity_hits: dict[str, Counter[str]] = {
+        "url": Counter(),
+        "path": Counter(),
+        "timestamp": Counter(),
+        "classlike": Counter(),
+    }
+    for line in text.splitlines():
+        for url in _URL_RE.findall(line):
+            entity_hits["url"][url] += 1
+        for found_path in _PATH_RE.findall(line):
+            entity_hits["path"][found_path] += 1
+        for ts in _TS_RE.findall(line):
+            entity_hits["timestamp"][ts] += 1
+        for token in _CLASSLIKE_RE.findall(line):
+            entity_hits["classlike"][token] += 1
+
+    entities: list[dict[str, object]] = []
+    for kind, counts in entity_hits.items():
+        entities.extend(
+            [{"type": kind, "value": value, "count": count} for value, count in counts.most_common(max_per_type)]
+        )
+    if max_total is not None:
+        entities.sort(key=lambda e: int(e["count"]), reverse=True)
+        entities = entities[:max_total]
+    return entities
+
+
+def _strip_js_literal_noise(line: str) -> str:
+    result: list[str] = []
+    in_single = False
+    in_double = False
+    in_template = False
+    in_regex = False
+    escaped = False
+    prev_sig = ""
+    i = 0
+    while i < len(line):
+        ch = line[i]
+        if in_single:
+            result.append(" ")
+            if escaped:
+                escaped = False
+            elif ch == "\\":
+                escaped = True
+            elif ch == "'":
+                in_single = False
+        elif in_double:
+            result.append(" ")
+            if escaped:
+                escaped = False
+            elif ch == "\\":
+                escaped = True
+            elif ch == '"':
+                in_double = False
+        elif in_template:
+            result.append(" ")
+            if escaped:
+                escaped = False
+            elif ch == "\\":
+                escaped = True
+            elif ch == "`":
+                in_template = False
+        elif in_regex:
+            result.append(" ")
+            if escaped:
+                escaped = False
+            elif ch == "\\":
+                escaped = True
+            elif ch == "/":
+                in_regex = False
+        else:
+            if ch == "/" and i + 1 < len(line) and line[i + 1] == "/":
+                break
+            if ch == "'":
+                in_single = True
+                result.append(" ")
+            elif ch == '"':
+                in_double = True
+                result.append(" ")
+            elif ch == "`":
+                in_template = True
+                result.append(" ")
+            elif ch == "/":
+                if prev_sig == "" or prev_sig in "([{:;=,!?&|^~<>+-*%":
+                    in_regex = True
+                    result.append(" ")
+                else:
+                    result.append(ch)
+                    prev_sig = ch
+            else:
+                result.append(ch)
+                if not ch.isspace():
+                    prev_sig = ch
+        i += 1
+    return "".join(result)
+
+
+def _read_cached_lines(path: Path) -> list[str] | None:
+    try:
+        stat = path.stat()
+    except OSError:
+        return None
+    cache_key = (stat.st_mtime_ns, stat.st_size)
+    cached = _FILE_LINE_CACHE.get(path)
+    if cached and cached[0] == cache_key[0] and cached[1] == cache_key[1]:
+        _FILE_LINE_CACHE.move_to_end(path)
+        return cached[2]
+    try:
+        lines = path.read_text(encoding="utf-8").splitlines()
+    except (OSError, UnicodeDecodeError):
+        return None
+    if path not in _FILE_LINE_CACHE and len(_FILE_LINE_CACHE) >= _FILE_LINE_CACHE_MAXSIZE:
+        _FILE_LINE_CACHE.popitem(last=False)
+    _FILE_LINE_CACHE[path] = (cache_key[0], cache_key[1], lines)
+    return lines
 
 
 def _remote_text_summary(text: str, max_sentences: int, endpoint: str, token: str = "") -> dict[str, object]:
@@ -199,9 +350,8 @@ def _collect_references(
     for candidate, language in files:
         lines = file_cache.get(candidate) if file_cache is not None else None
         if lines is None:
-            try:
-                lines = candidate.read_text(encoding="utf-8").splitlines()
-            except (OSError, UnicodeDecodeError):
+            lines = _read_cached_lines(candidate)
+            if lines is None:
                 continue
             if file_cache is not None:
                 file_cache[candidate] = lines
@@ -262,10 +412,45 @@ def _owner_map_for_file(file_lines: list[str], language: str) -> dict[int, str]:
         if match:
             stack_js.append((brace_depth, match.group(1)))
         owners[line_no] = stack_js[-1][1] if stack_js else "<module>"
-        open_count = stripped.count("{")
-        close_count = stripped.count("}")
+        brace_safe_line = _strip_js_literal_noise(stripped)
+        open_count = brace_safe_line.count("{")
+        close_count = brace_safe_line.count("}")
         brace_depth = max(0, brace_depth + open_count - close_count)
     return owners
+
+
+def _declaration_body_range(file_lines: list[str], language: str, declaration_line: int) -> tuple[int, int]:
+    if declaration_line < 1 or declaration_line > len(file_lines):
+        return declaration_line, declaration_line
+
+    if language == "python":
+        declaration_indent = len(file_lines[declaration_line - 1]) - len(file_lines[declaration_line - 1].lstrip(" "))
+        end_line = len(file_lines)
+        for line_no in range(declaration_line + 1, len(file_lines) + 1):
+            line = file_lines[line_no - 1]
+            stripped = line.strip()
+            if not stripped:
+                continue
+            indent = len(line) - len(line.lstrip(" "))
+            if indent <= declaration_indent:
+                end_line = line_no - 1
+                break
+        return declaration_line, max(declaration_line, end_line)
+
+    brace_depth = 0
+    saw_open = False
+    end_line = len(file_lines)
+    for line_no in range(declaration_line, len(file_lines) + 1):
+        line = _strip_js_literal_noise(file_lines[line_no - 1])
+        open_count = line.count("{")
+        close_count = line.count("}")
+        brace_depth += open_count - close_count
+        if open_count > 0:
+            saw_open = True
+        if saw_open and brace_depth <= 0 and line_no > declaration_line:
+            end_line = line_no
+            break
+    return declaration_line, max(declaration_line, end_line)
 
 
 def _collect_callgraph(
@@ -278,41 +463,82 @@ def _collect_callgraph(
     file_cache: dict[Path, list[str]] | None = None,
 ) -> dict[str, object]:
     if symbol_kind != "function":
-        return {"callers": [], "sites": [], "truncated": False}
+        return {"callers": [], "sites": [], "callees": [], "callee_sites": [], "truncated": False}
 
     call_pattern = re.compile(rf"\b{re.escape(symbol)}\s*\(")
+    callee_pattern = _CALL_EXPR_RE
     callers: set[str] = set()
     sites: list[dict[str, object]] = []
+    callee_counts: Counter[str] = Counter()
+    callee_sites: list[dict[str, object]] = []
+    truncated = False
 
     for candidate, language in files:
         lines = file_cache.get(candidate) if file_cache is not None else None
         if lines is None:
-            try:
-                lines = candidate.read_text(encoding="utf-8").splitlines()
-            except (OSError, UnicodeDecodeError):
+            lines = _read_cached_lines(candidate)
+            if lines is None:
                 continue
             if file_cache is not None:
                 file_cache[candidate] = lines
         owners = _owner_map_for_file(lines, language)
+        declaration_body_start, declaration_body_end = (
+            _declaration_body_range(lines, language, declaration_line)
+            if str(candidate) == declaration_path
+            else (0, -1)
+        )
         for line_no, line in enumerate(lines, start=1):
             if str(candidate) == declaration_path and line_no == declaration_line:
                 continue
-            if not call_pattern.search(line):
+            sanitized = _strip_js_literal_noise(line) if language != "python" else line
+            if not call_pattern.search(sanitized):
+                pass
+            else:
+                owner = owners.get(line_no, "<module>")
+                callers.add(owner)
+                if len(sites) < max_items:
+                    sites.append(
+                        {
+                            "path": str(candidate),
+                            "line": line_no,
+                            "language": language,
+                            "caller": owner,
+                            "snippet": line.strip(),
+                        }
+                    )
+                else:
+                    truncated = True
+
+            if not (str(candidate) == declaration_path and declaration_body_start <= line_no <= declaration_body_end):
                 continue
-            owner = owners.get(line_no, "<module>")
-            callers.add(owner)
-            sites.append(
-                {
-                    "path": str(candidate),
-                    "line": line_no,
-                    "language": language,
-                    "caller": owner,
-                    "snippet": line.strip(),
-                }
-            )
-            if len(sites) >= max_items:
-                return {"callers": sorted(callers), "sites": sites, "truncated": True}
-    return {"callers": sorted(callers), "sites": sites, "truncated": False}
+            for match in callee_pattern.finditer(sanitized):
+                callee = match.group(1)
+                if callee == symbol or callee in _CALL_EXPR_EXCLUDE:
+                    continue
+                if _DECL_PREFIX_RE.search(sanitized[: match.start(1)]):
+                    continue
+                callee_counts[callee] += 1
+                if len(callee_sites) < max_items:
+                    callee_sites.append(
+                        {
+                            "path": str(candidate),
+                            "line": line_no,
+                            "language": language,
+                            "callee": callee,
+                            "snippet": line.strip(),
+                        }
+                    )
+                else:
+                    truncated = True
+
+    return {
+        "callers": sorted(callers),
+        "sites": sites,
+        "site_count": len(sites),
+        "callees": [{"symbol": name, "count": count} for name, count in callee_counts.most_common()],
+        "callee_sites": callee_sites,
+        "truncated": truncated,
+    }
 
 
 def register(mcp: FastMCP) -> None:
@@ -405,6 +631,7 @@ def register(mcp: FastMCP) -> None:
         mode: str = "auto",
         max_points: int = 20,
         max_bytes: int = 200_000,
+        max_entities: int = 10,
         include_patterns: list[str] | None = None,
         exclude_patterns: list[str] | None = None,
     ) -> dict[str, object]:
@@ -438,7 +665,6 @@ def register(mcp: FastMCP) -> None:
         points = max(1, min(max_points, 200))
         candidates: list[dict[str, object]] = []
         pattern_hits = Counter()
-        entity_hits: dict[str, Counter[str]] = {"url": Counter(), "path": Counter(), "timestamp": Counter()}
 
         for line_no, raw_line in enumerate(lines, start=1):
             line = raw_line.strip()
@@ -467,13 +693,6 @@ def register(mcp: FastMCP) -> None:
                 if re.search(rf"\b{keyword}\b", line, re.IGNORECASE):
                     pattern_hits[keyword] += 1
 
-            for url in _URL_RE.findall(line):
-                entity_hits["url"][url] += 1
-            for found_path in _PATH_RE.findall(line):
-                entity_hits["path"][found_path] += 1
-            for ts in _TS_RE.findall(line):
-                entity_hits["timestamp"][ts] += 1
-
             candidates.append({"line": line_no, "text": line, "score": score, "reasons": reasons})
 
         if not candidates:
@@ -500,9 +719,7 @@ def register(mcp: FastMCP) -> None:
                 break
 
         top_patterns = [{"pattern": key, "count": count} for key, count in pattern_hits.most_common(10)]
-        entities: list[dict[str, object]] = []
-        for kind, counts in entity_hits.items():
-            entities.extend([{"type": kind, "value": value, "count": count} for value, count in counts.most_common(5)])
+        entities = _extract_entities(source_text, max_per_type=max(1, max_entities), max_total=max_entities)
 
         bullets = [entry["text"] for entry in selected[: min(5, len(selected))]]
         avg_score = mean([int(item["score"]) for item in candidates]) if candidates else 0.0
@@ -529,6 +746,8 @@ def register(mcp: FastMCP) -> None:
         path: str = "",
         max_sentences: int = 3,
         backend: str = "auto",
+        include_entities: bool = False,
+        max_entities: int = 10,
     ) -> dict[str, object]:
         _REQUESTS["text_summarize"] += 1
         if not text and not path:
@@ -561,7 +780,7 @@ def register(mcp: FastMCP) -> None:
 
         summary, bullets, summary_stats = _extractive_summary(source_text, max_sentences=max_sentences)
         chosen_backend = "local-extractive"
-        return {
+        result = {
             "summary": summary,
             "bullets": bullets,
             "backend": chosen_backend,
@@ -571,12 +790,18 @@ def register(mcp: FastMCP) -> None:
                 **summary_stats,
             },
         }
+        if include_entities:
+            entities = _extract_entities(source_text, max_per_type=max(1, max_entities), max_total=max_entities)
+            result["entities"] = entities
+            result["stats"]["entity_count"] = len(entities)
+        return result
 
     @mcp.tool
     def apply_text_patch(
         path: str,
         edits: list[dict[str, object]],
         dry_run: bool = False,
+        include_preview: bool = False,
         create: bool = False,
         expected_hash: str = "",
         workspace_root: str = "",
@@ -623,6 +848,7 @@ def register(mcp: FastMCP) -> None:
         lines = original_text.splitlines()
         has_trailing_newline = original_text.endswith("\n")
         parsed_edits: list[dict[str, object]] = []
+        preview_edits: list[dict[str, object]] = []
         allowed_ops = {"replace", "delete", "insert_before", "insert_after"}
 
         for idx, edit in enumerate(edits, start=1):
@@ -673,6 +899,27 @@ def register(mcp: FastMCP) -> None:
                     "replacement": replacement,
                 }
             )
+            if dry_run or include_preview:
+                before_content = _slice_lines(lines, start_line, end_line)
+                after_content = "\n".join(replacement)
+                preview_edits.append(
+                    {
+                        "index": idx,
+                        "op": op,
+                        "target": {
+                            "start_line": start_line,
+                            "end_line": end_line,
+                        },
+                        "before": {
+                            "content": before_content,
+                            "line_count": 0 if not before_content else before_content.count("\n") + 1,
+                        },
+                        "after": {
+                            "content": after_content,
+                            "line_count": 0 if not after_content else after_content.count("\n") + 1,
+                        },
+                    }
+                )
 
         # Validate conflicts against original coordinates.
         consumed_ranges: list[tuple[int, int, int]] = []
@@ -737,13 +984,14 @@ def register(mcp: FastMCP) -> None:
         else:
             result_text = ""
         after_hash = _sha256_text(result_text)
-        changed = after_hash != before_hash
+        changed = after_hash != before_hash or not exists
 
         if not dry_run and changed:
             resolved.parent.mkdir(parents=True, exist_ok=True)
             resolved.write_text(result_text, encoding="utf-8")
+            _FILE_LINE_CACHE.pop(resolved, None)
 
-        return {
+        result = {
             "path": str(resolved),
             "applied": len(parsed_edits),
             "changed": changed,
@@ -763,6 +1011,64 @@ def register(mcp: FastMCP) -> None:
                 }
                 for edit in parsed_edits
             ],
+        }
+        if dry_run or include_preview:
+            result["preview"] = {
+                "edits": preview_edits,
+                "result": {
+                    "content": result_text,
+                    "line_count": len(updated_lines),
+                },
+            }
+        return result
+
+    @mcp.tool
+    def apply_text_patch_batch(
+        patches: list[dict[str, object]],
+        dry_run: bool = False,
+        workspace_root: str = "",
+    ) -> dict[str, object]:
+        _REQUESTS["apply_text_patch_batch"] += 1
+        if not patches:
+            return {"error": "patches must contain at least one patch item."}
+
+        results: list[dict[str, object]] = []
+        changed = 0
+        applied = 0
+        failed = 0
+        for index, patch in enumerate(patches, start=1):
+            if not isinstance(patch, dict):
+                failed += 1
+                results.append({"index": index, "error": "Each patch item must be a JSON object."})
+                continue
+            path = str(patch.get("path", "")).strip()
+            edits = patch.get("edits", [])
+            patch_dry_run = bool(patch.get("dry_run", dry_run))
+            patch_workspace_root = workspace_root if workspace_root else str(patch.get("workspace_root", "")).strip()
+            result = apply_text_patch(
+                path=path,
+                edits=edits if isinstance(edits, list) else [],
+                dry_run=patch_dry_run,
+                include_preview=bool(patch.get("include_preview", patch_dry_run)),
+                create=bool(patch.get("create", False)),
+                expected_hash=str(patch.get("expected_hash", "")),
+                workspace_root=patch_workspace_root,
+            )
+            if "error" in result:
+                failed += 1
+            else:
+                applied += 1
+                if result.get("changed"):
+                    changed += 1
+            result["index"] = index
+            results.append(result)
+
+        return {
+            "results": results,
+            "applied": applied,
+            "changed": changed,
+            "failed": failed,
+            "dry_run": dry_run,
         }
 
     @mcp.tool
@@ -791,15 +1097,23 @@ def register(mcp: FastMCP) -> None:
         for source in paths:
             resolved = resolve_path(source)
             if resolved.is_dir():
-                for suffix, language in (("*.py", "python"), ("*.js", "javascript"), ("*.ts", "typescript")):
+                for suffix, language in (
+                    ("*.py", "python"),
+                    ("*.js", "javascript"),
+                    ("*.jsx", "javascript"),
+                    ("*.mjs", "javascript"),
+                    ("*.cjs", "javascript"),
+                    ("*.ts", "typescript"),
+                    ("*.tsx", "typescript"),
+                ):
                     candidates.extend([(p, language) for p in resolved.rglob(suffix) if p.is_file()])
             elif resolved.is_file():
                 suffix = resolved.suffix.lower()
                 if suffix == ".py":
                     candidates.append((resolved, "python"))
-                elif suffix == ".js":
+                elif suffix in {".js", ".jsx", ".mjs", ".cjs"}:
                     candidates.append((resolved, "javascript"))
-                elif suffix == ".ts":
+                elif suffix in {".ts", ".tsx"}:
                     candidates.append((resolved, "typescript"))
 
         q = query.lower().strip()
@@ -809,9 +1123,8 @@ def register(mcp: FastMCP) -> None:
         for candidate, language in candidates:
             file_lines = file_cache.get(candidate)
             if file_lines is None:
-                try:
-                    file_lines = candidate.read_text(encoding="utf-8").splitlines()
-                except (OSError, UnicodeDecodeError):
+                file_lines = _read_cached_lines(candidate)
+                if file_lines is None:
                     continue
                 file_cache[candidate] = file_lines
             for line_no, line in enumerate(file_lines, start=1):

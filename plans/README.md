@@ -4,6 +4,7 @@ This directory holds the follow-up implementation plans for missing Copilot-assi
 
 ## Tracks
 
+- `follow-up-roadmap.md` — consolidated roadmap for remaining enhancement work
 - `text-distillation.md` — deterministic text compaction and optional summarization
 - `safe-editing.md` — patch-based file editing with guardrails
 - `code-navigation.md` — symbol-aware navigation and lookup
