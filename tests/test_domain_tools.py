@@ -640,6 +640,62 @@ def test_apply_text_patch_workspace_root_policy(tmp_path: Path) -> None:
     assert details.get("type") == "path-outside-root"
 
 
+def test_apply_text_patch_relative_path(tmp_path: Path) -> None:
+    root = tmp_path / "workspace"
+    root.mkdir()
+    (root / "sub").mkdir()
+    target = root / "sub" / "file.txt"
+    target.write_text("hello\nworld\n", encoding="utf-8")
+
+    result = _call(
+        "apply_text_patch",
+        {
+            "path": "sub/file.txt",
+            "workspace_root": str(root),
+            "edits": [{"start_line": 1, "end_line": 1, "content": "HELLO"}],
+        },
+    )
+    assert isinstance(result, dict)
+    assert "error" not in result
+    assert target.read_text(encoding="utf-8") == "HELLO\nworld\n"
+
+
+def test_apply_text_patch_batch_relative_path(tmp_path: Path) -> None:
+    root = tmp_path / "workspace"
+    root.mkdir()
+    first = root / "a.txt"
+    first.write_text("x\n", encoding="utf-8")
+
+    result = _call(
+        "apply_text_patch_batch",
+        {
+            "workspace_root": str(root),
+            "patches": [
+                {
+                    "path": "a.txt",
+                    "edits": [{"start_line": 1, "end_line": 1, "content": "X"}],
+                }
+            ],
+        },
+    )
+    assert isinstance(result, dict)
+    assert "error" not in result
+    assert result.get("applied") == 1
+    assert first.read_text(encoding="utf-8") == "X\n"
+
+
+def test_symbol_search_invalid_kind_message(tmp_path: Path) -> None:
+    target = tmp_path / "module.py"
+    target.write_text("def run():\n    pass\n", encoding="utf-8")
+    for bad_kind in ("fn", "enum", "variant"):
+        result = _call("symbol_search", {"paths": [str(target)], "kinds": [bad_kind]})
+        assert isinstance(result, dict)
+        assert "error" in result
+        assert "function" in result["error"]
+        assert "class" in result["error"]
+        assert "variable" in result["error"]
+
+
 def test_apply_text_patch_workspace_root_required(tmp_path: Path) -> None:
     target = tmp_path / "required.txt"
     target.write_text("a\n", encoding="utf-8")
