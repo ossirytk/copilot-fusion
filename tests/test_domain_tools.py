@@ -20,6 +20,10 @@ def _call(tool: str, args: dict | None = None) -> object:
     return asyncio.run(_run())
 
 
+def _join_lines(*lines: str) -> str:
+    return "\n".join(lines)
+
+
 def test_core_memory_roundtrip() -> None:
     with tempfile.TemporaryDirectory() as tmp:
         memory = _call(
@@ -169,13 +173,11 @@ def test_remember_file_markdown_split() -> None:
 
 
 def test_text_compact_from_text() -> None:
-    payload = "\n".join(
-        [
-            "info: startup complete",
-            "2026-05-27T14:00:00Z ERROR TimeoutError while calling https://api.example.dev/v1/items",
-            "warning: retrying request",
-            'traceback: File "/srv/app/main.py", line 42',
-        ]
+    payload = _join_lines(
+        "info: startup complete",
+        "2026-05-27T14:00:00Z ERROR TimeoutError while calling https://api.example.dev/v1/items",
+        "warning: retrying request",
+        'traceback: File "/srv/app/main.py", line 42',
     )
     result = _call("text_compact", {"text": payload, "max_points": 3})
     assert isinstance(result, dict)
@@ -192,13 +194,11 @@ def test_text_compact_from_text() -> None:
 def test_text_compact_from_path_with_filters(tmp_path: Path) -> None:
     source = tmp_path / "log.txt"
     source.write_text(
-        "\n".join(
-            [
-                "INFO Connected to /srv/app/config.yaml",
-                "ERROR payment failed for order 123",
-                "WARN noisy line to skip",
-                "ERROR blocked by policy",
-            ]
+        _join_lines(
+            "INFO Connected to /srv/app/config.yaml",
+            "ERROR payment failed for order 123",
+            "WARN noisy line to skip",
+            "ERROR blocked by policy",
         ),
         encoding="utf-8",
     )
@@ -268,12 +268,10 @@ def test_text_summarize_from_text_and_path(tmp_path: Path) -> None:
 
 
 def test_text_summarize_entity_extraction() -> None:
-    text = "\n".join(
-        [
-            "2026-05-29T18:59:16Z ERROR TimeoutError while calling https://api.example.dev/v1/items",
-            'Traceback: File "/srv/app/main.py", line 41',
-            "Retrying /srv/app/config.yaml after failure",
-        ]
+    text = _join_lines(
+        "2026-05-29T18:59:16Z ERROR TimeoutError while calling https://api.example.dev/v1/items",
+        'Traceback: File "/srv/app/main.py", line 41',
+        "Retrying /srv/app/config.yaml after failure",
     )
     result = _call(
         "text_summarize",
@@ -397,16 +395,14 @@ def test_text_summarize_auto_prefers_remote(monkeypatch) -> None:
 
 
 def test_text_distillation_quality_checks_on_logs() -> None:
-    corpus = "\n".join(
-        [
-            "INFO boot complete",
-            "INFO polling upstream service",
-            "ERROR TimeoutError while calling https://api.example.dev/v1/items",
-            "Traceback (most recent call last):",
-            '  File "/srv/app/main.py", line 41, in run',
-            "WARN retrying request after timeout",
-            "INFO request succeeded on retry",
-        ]
+    corpus = _join_lines(
+        "INFO boot complete",
+        "INFO polling upstream service",
+        "ERROR TimeoutError while calling https://api.example.dev/v1/items",
+        "Traceback (most recent call last):",
+        '  File "/srv/app/main.py", line 41, in run',
+        "WARN retrying request after timeout",
+        "INFO request succeeded on retry",
     )
     compact = _call("text_compact", {"text": corpus, "mode": "errors-first", "max_points": 4})
     summarize = _call("text_summarize", {"text": corpus, "max_sentences": 2})
@@ -424,13 +420,11 @@ def test_text_distillation_quality_checks_on_logs() -> None:
 
 
 def test_text_distillation_quality_checks_on_prose() -> None:
-    corpus = "\n".join(
-        [
-            "The release candidate ships with a smaller bundle and faster startup.",
-            "We are deprecating the legacy migration path in favor of the new workflow.",
-            "This note contains extra background that should be less important.",
-            "The migration guide highlights compatibility and rollout steps.",
-        ]
+    corpus = _join_lines(
+        "The release candidate ships with a smaller bundle and faster startup.",
+        "We are deprecating the legacy migration path in favor of the new workflow.",
+        "This note contains extra background that should be less important.",
+        "The migration guide highlights compatibility and rollout steps.",
     )
     compact = _call("text_compact", {"text": corpus, "max_points": 3, "include_patterns": ["migration", "release"]})
     summarize = _call("text_summarize", {"text": corpus, "max_sentences": 2})
@@ -745,16 +739,14 @@ def test_apply_text_patch_batch(tmp_path: Path) -> None:
 def test_symbol_search_python_symbols(tmp_path: Path) -> None:
     target = tmp_path / "module.py"
     target.write_text(
-        "\n".join(
-            [
-                "VALUE = 1",
-                "",
-                "class Runner:",
-                "    pass",
-                "",
-                "def run_task(arg: str) -> str:",
-                "    return arg",
-            ]
+        _join_lines(
+            "VALUE = 1",
+            "",
+            "class Runner:",
+            "    pass",
+            "",
+            "def run_task(arg: str) -> str:",
+            "    return arg",
         ),
         encoding="utf-8",
     )
@@ -778,15 +770,13 @@ def test_symbol_search_invalid_kind(tmp_path: Path) -> None:
 def test_symbol_search_truncation(tmp_path: Path) -> None:
     target = tmp_path / "many.py"
     target.write_text(
-        "\n".join(
-            [
-                "def one():",
-                "    return 1",
-                "def two():",
-                "    return 2",
-                "def three():",
-                "    return 3",
-            ]
+        _join_lines(
+            "def one():",
+            "    return 1",
+            "def two():",
+            "    return 2",
+            "def three():",
+            "    return 3",
         ),
         encoding="utf-8",
     )
@@ -814,42 +804,34 @@ def test_symbol_search_cache_invalidation(tmp_path: Path) -> None:
 def test_symbol_search_javascript_and_typescript(tmp_path: Path) -> None:
     js_file = tmp_path / "mod.js"
     js_file.write_text(
-        "\n".join(
-            [
-                "export function buildClient() { return {}; }",
-                "export class Worker {}",
-                "const timeoutMs = 1000",
-            ]
+        _join_lines(
+            "export function buildClient() { return {}; }",
+            "export class Worker {}",
+            "const timeoutMs = 1000",
         ),
         encoding="utf-8",
     )
     jsx_file = tmp_path / "view.jsx"
     jsx_file.write_text(
-        "\n".join(
-            [
-                "export function RenderView() { return <div />; }",
-                "export const jsxValue = 1;",
-            ]
+        _join_lines(
+            "export function RenderView() { return <div />; }",
+            "export const jsxValue = 1;",
         ),
         encoding="utf-8",
     )
     ts_file = tmp_path / "mod.ts"
     ts_file.write_text(
-        "\n".join(
-            [
-                "export const runTask = async () => true;",
-                "class TaskRunner {}",
-            ]
+        _join_lines(
+            "export const runTask = async () => true;",
+            "class TaskRunner {}",
         ),
         encoding="utf-8",
     )
     tsx_file = tmp_path / "panel.tsx"
     tsx_file.write_text(
-        "\n".join(
-            [
-                "export function RenderPanel() { return <section />; }",
-                "const tsxValue = 2;",
-            ]
+        _join_lines(
+            "export function RenderPanel() { return <section />; }",
+            "const tsxValue = 2;",
         ),
         encoding="utf-8",
     )
@@ -873,14 +855,12 @@ def test_symbol_search_javascript_and_typescript(tmp_path: Path) -> None:
 def test_symbol_search_references_and_metadata(tmp_path: Path) -> None:
     source = tmp_path / "refs.py"
     source.write_text(
-        "\n".join(
-            [
-                "def build_client():",
-                "    return 1",
-                "",
-                "x = build_client()",
-                "print(build_client())",
-            ]
+        _join_lines(
+            "def build_client():",
+            "    return 1",
+            "",
+            "x = build_client()",
+            "print(build_client())",
         ),
         encoding="utf-8",
     )
@@ -910,14 +890,12 @@ def test_symbol_search_references_and_metadata(tmp_path: Path) -> None:
 def test_symbol_search_callsites(tmp_path: Path) -> None:
     source = tmp_path / "calls.py"
     source.write_text(
-        "\n".join(
-            [
-                "def compute_value(x):",
-                "    return x + 1",
-                "",
-                "result = compute_value(3)",
-                "print(compute_value(4))",
-            ]
+        _join_lines(
+            "def compute_value(x):",
+            "    return x + 1",
+            "",
+            "result = compute_value(3)",
+            "print(compute_value(4))",
         ),
         encoding="utf-8",
     )
@@ -947,27 +925,23 @@ def test_symbol_search_callsites(tmp_path: Path) -> None:
 def test_symbol_search_callgraph(tmp_path: Path) -> None:
     py_file = tmp_path / "graph.py"
     py_file.write_text(
-        "\n".join(
-            [
-                "def helper():",
-                "    return 1",
-                "",
-                "def run():",
-                "    return helper()",
-                "",
-                "value = helper()",
-            ]
+        _join_lines(
+            "def helper():",
+            "    return 1",
+            "",
+            "def run():",
+            "    return helper()",
+            "",
+            "value = helper()",
         ),
         encoding="utf-8",
     )
     js_file = tmp_path / "graph.js"
     js_file.write_text(
-        "\n".join(
-            [
-                "function api() { return 1; }",
-                "function main() { return api(); }",
-                "const top = api();",
-            ]
+        _join_lines(
+            "function api() { return 1; }",
+            "function main() { return api(); }",
+            "const top = api();",
         ),
         encoding="utf-8",
     )
@@ -1045,12 +1019,10 @@ def test_symbol_search_callgraph(tmp_path: Path) -> None:
 
     js_quirks = tmp_path / "quirks.js"
     js_quirks.write_text(
-        "\n".join(
-            [
-                'function outer() { const msg = "use { brace }"; return msg; }',
-                "const topLevel = helper();",
-                "function helper() { return 1; }",
-            ]
+        _join_lines(
+            'function outer() { const msg = "use { brace }"; return msg; }',
+            "const topLevel = helper();",
+            "function helper() { return 1; }",
         ),
         encoding="utf-8",
     )
@@ -1074,14 +1046,12 @@ def test_symbol_search_callgraph(tmp_path: Path) -> None:
 
     js_regex = tmp_path / "regex.js"
     js_regex.write_text(
-        "\n".join(
-            [
-                "function compute() {",
-                "  const r = /pattern}/;",
-                "  return helper();",
-                "}",
-                "function helper() { return 1; }",
-            ]
+        _join_lines(
+            "function compute() {",
+            "  const r = /pattern}/;",
+            "  return helper();",
+            "}",
+            "function helper() { return 1; }",
         ),
         encoding="utf-8",
     )
