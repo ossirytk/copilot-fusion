@@ -1,8 +1,8 @@
 import asyncio
 
-from pytest import MonkeyPatch
 from copilot_fusion.server import create_server
 from copilot_fusion_shared import FusionConfig
+from pytest import MonkeyPatch
 
 
 def _tool_names() -> list[str]:

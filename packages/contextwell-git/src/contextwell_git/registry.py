@@ -6,8 +6,8 @@ high-utility behavior.
 
 from __future__ import annotations
 
-from fastmcp import FastMCP
 from copilot_fusion_shared import resolve_path, run_command
+from fastmcp import FastMCP
 
 
 def _ok(**payload: object) -> dict[str, object]:

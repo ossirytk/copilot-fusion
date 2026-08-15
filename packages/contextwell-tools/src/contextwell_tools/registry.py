@@ -13,8 +13,8 @@ from typing import Any
 from urllib.error import HTTPError, URLError
 from urllib.request import Request, urlopen
 
-from fastmcp import FastMCP
 from copilot_fusion_shared import resolve_path
+from fastmcp import FastMCP
 
 try:
     import tomllib
@@ -816,8 +816,12 @@ def register(mcp: FastMCP) -> None:
                 "error": "workspace_root is required (or set FUSION_WORKSPACE_ROOT).",
                 "details": {"type": "workspace-root-required"},
             }
-        resolved = resolve_path(path)
         root = resolve_path(effective_workspace_root)
+        p = Path(path).expanduser()
+        if p.is_absolute():
+            resolved = p.resolve()
+        else:
+            resolved = (root / p).resolve()
         try:
             resolved.relative_to(root)
         except ValueError:
@@ -1083,6 +1087,12 @@ def register(mcp: FastMCP) -> None:
         include_callgraph: bool = False,
         max_callgraph_edges: int = 50,
     ) -> dict[str, object]:
+        """Search for symbols (functions, classes, variables) in source files.
+
+        Supported ``kinds`` values are ``"function"``, ``"class"``, and
+        ``"variable"``.  Language-specific names such as ``fn``, ``enum``, or
+        ``variant`` are not valid; use the generic names above instead.
+        """
         _REQUESTS["symbol_search"] += 1
         if not paths:
             return {"error": "paths must contain at least one file or directory."}

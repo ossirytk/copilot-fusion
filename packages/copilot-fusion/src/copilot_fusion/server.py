@@ -1,12 +1,13 @@
 """Unified MCP server entry point for copilot-fusion."""
 
-from copilot_fusion.api_compat import build_matrix
 from contextwell_core import register as register_core
 from contextwell_diff import register as register_diff
 from contextwell_git import register as register_git
 from contextwell_tools import register as register_tools
 from copilot_fusion_shared import FusionConfig
 from fastmcp import FastMCP
+
+from copilot_fusion.api_compat import build_matrix
 
 
 def create_server(config: FusionConfig | None = None) -> FastMCP:

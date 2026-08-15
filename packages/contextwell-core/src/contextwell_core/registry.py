@@ -9,9 +9,8 @@ from datetime import UTC, datetime
 from pathlib import Path
 from typing import Literal
 
-from fastmcp import FastMCP
 from copilot_fusion_shared import app_data_dir, resolve_path
-
+from fastmcp import FastMCP
 
 MemoryType = Literal["code", "chat", "decision", "todo", "fact"]
 MemoryScope = Literal["project", "global"]
@@ -67,7 +66,7 @@ def register(mcp: FastMCP) -> None:
     @mcp.tool
     def remember(
         content: str,
-        type: MemoryType = "fact",  # noqa: A002
+        type: MemoryType = "fact",
         scope: MemoryScope = "global",
         tags: list[str] | None = None,
         source: str = "",
@@ -252,7 +251,7 @@ def register(mcp: FastMCP) -> None:
     def update(
         memory_id: str,
         content: str | None = None,
-        type: MemoryType | None = None,  # noqa: A002
+        type: MemoryType | None = None,
         tags: list[str] | None = None,
         source: str | None = None,
     ) -> dict[str, object]:
@@ -338,7 +337,7 @@ def register(mcp: FastMCP) -> None:
     @mcp.tool
     def compress_memories(
         summary: str,
-        type: MemoryType | str = "",  # noqa: A002
+        type: MemoryType | str = "",
         scope: MemoryScope | str = "",
         threshold: float = 0.85,
         tags: list[str] | None = None,
@@ -359,9 +358,9 @@ def register(mcp: FastMCP) -> None:
 
     @mcp.tool
     def export_memories(
-        format: Literal["json", "markdown", "org"] = "json",  # noqa: A002
+        format: Literal["json", "markdown", "org"] = "json",
         scope: MemoryScope | str = "",
-        type: MemoryType | str = "",  # noqa: A002
+        type: MemoryType | str = "",
         tags: list[str] | None = None,
         since: str = "",
         until: str = "",

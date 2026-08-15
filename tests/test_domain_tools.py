@@ -20,6 +20,10 @@ def _call(tool: str, args: dict | None = None) -> object:
     return asyncio.run(_run())
 
 
+def _join_lines(*lines: str) -> str:
+    return "\n".join(lines)
+
+
 def test_core_memory_roundtrip() -> None:
     with tempfile.TemporaryDirectory() as tmp:
         memory = _call(
@@ -169,13 +173,11 @@ def test_remember_file_markdown_split() -> None:
 
 
 def test_text_compact_from_text() -> None:
-    payload = "\n".join(
-        [
-            "info: startup complete",
-            "2026-05-27T14:00:00Z ERROR TimeoutError while calling https://api.example.dev/v1/items",
-            "warning: retrying request",
-            'traceback: File "/srv/app/main.py", line 42',
-        ]
+    payload = _join_lines(
+        "info: startup complete",
+        "2026-05-27T14:00:00Z ERROR TimeoutError while calling https://api.example.dev/v1/items",
+        "warning: retrying request",
+        'traceback: File "/srv/app/main.py", line 42',
     )
     result = _call("text_compact", {"text": payload, "max_points": 3})
     assert isinstance(result, dict)
@@ -192,13 +194,11 @@ def test_text_compact_from_text() -> None:
 def test_text_compact_from_path_with_filters(tmp_path: Path) -> None:
     source = tmp_path / "log.txt"
     source.write_text(
-        "\n".join(
-            [
-                "INFO Connected to /srv/app/config.yaml",
-                "ERROR payment failed for order 123",
-                "WARN noisy line to skip",
-                "ERROR blocked by policy",
-            ]
+        _join_lines(
+            "INFO Connected to /srv/app/config.yaml",
+            "ERROR payment failed for order 123",
+            "WARN noisy line to skip",
+            "ERROR blocked by policy",
         ),
         encoding="utf-8",
     )
@@ -268,12 +268,10 @@ def test_text_summarize_from_text_and_path(tmp_path: Path) -> None:
 
 
 def test_text_summarize_entity_extraction() -> None:
-    text = "\n".join(
-        [
-            "2026-05-29T18:59:16Z ERROR TimeoutError while calling https://api.example.dev/v1/items",
-            'Traceback: File "/srv/app/main.py", line 41',
-            "Retrying /srv/app/config.yaml after failure",
-        ]
+    text = _join_lines(
+        "2026-05-29T18:59:16Z ERROR TimeoutError while calling https://api.example.dev/v1/items",
+        'Traceback: File "/srv/app/main.py", line 41',
+        "Retrying /srv/app/config.yaml after failure",
     )
     result = _call(
         "text_summarize",
@@ -301,7 +299,7 @@ def test_text_summarize_remote_backend(monkeypatch) -> None:
     request_state: dict[str, object] = {}
 
     class Handler(BaseHTTPRequestHandler):
-        def do_POST(self) -> None:  # noqa: N802
+        def do_POST(self) -> None:
             length = int(self.headers.get("Content-Length", "0"))
             payload = self.rfile.read(length).decode("utf-8")
             request_state["payload"] = json.loads(payload)
@@ -319,7 +317,7 @@ def test_text_summarize_remote_backend(monkeypatch) -> None:
             self.end_headers()
             self.wfile.write(body)
 
-        def log_message(self, format: str, *args: object) -> None:  # noqa: A003
+        def log_message(self, format: str, *args: object) -> None:
             return
 
     server = ThreadingHTTPServer(("127.0.0.1", 0), Handler)
@@ -343,7 +341,7 @@ def test_text_summarize_remote_backend(monkeypatch) -> None:
 
 def test_text_summarize_remote_backend_non_utf8(monkeypatch) -> None:
     class Handler(BaseHTTPRequestHandler):
-        def do_POST(self) -> None:  # noqa: N802
+        def do_POST(self) -> None:
             body = b"\x80\x81"
             self.send_response(200)
             self.send_header("Content-Type", "application/json")
@@ -351,7 +349,7 @@ def test_text_summarize_remote_backend_non_utf8(monkeypatch) -> None:
             self.end_headers()
             self.wfile.write(body)
 
-        def log_message(self, format: str, *args: object) -> None:  # noqa: A003
+        def log_message(self, format: str, *args: object) -> None:
             return
 
     server = ThreadingHTTPServer(("127.0.0.1", 0), Handler)
@@ -370,7 +368,7 @@ def test_text_summarize_remote_backend_non_utf8(monkeypatch) -> None:
 
 def test_text_summarize_auto_prefers_remote(monkeypatch) -> None:
     class Handler(BaseHTTPRequestHandler):
-        def do_POST(self) -> None:  # noqa: N802
+        def do_POST(self) -> None:
             body = json.dumps({"summary": "auto remote", "bullets": ["one"], "stats": {}}).encode("utf-8")
             self.send_response(200)
             self.send_header("Content-Type", "application/json")
@@ -378,7 +376,7 @@ def test_text_summarize_auto_prefers_remote(monkeypatch) -> None:
             self.end_headers()
             self.wfile.write(body)
 
-        def log_message(self, format: str, *args: object) -> None:  # noqa: A003
+        def log_message(self, format: str, *args: object) -> None:
             return
 
     server = ThreadingHTTPServer(("127.0.0.1", 0), Handler)
@@ -397,16 +395,14 @@ def test_text_summarize_auto_prefers_remote(monkeypatch) -> None:
 
 
 def test_text_distillation_quality_checks_on_logs() -> None:
-    corpus = "\n".join(
-        [
-            "INFO boot complete",
-            "INFO polling upstream service",
-            "ERROR TimeoutError while calling https://api.example.dev/v1/items",
-            "Traceback (most recent call last):",
-            '  File "/srv/app/main.py", line 41, in run',
-            "WARN retrying request after timeout",
-            "INFO request succeeded on retry",
-        ]
+    corpus = _join_lines(
+        "INFO boot complete",
+        "INFO polling upstream service",
+        "ERROR TimeoutError while calling https://api.example.dev/v1/items",
+        "Traceback (most recent call last):",
+        '  File "/srv/app/main.py", line 41, in run',
+        "WARN retrying request after timeout",
+        "INFO request succeeded on retry",
     )
     compact = _call("text_compact", {"text": corpus, "mode": "errors-first", "max_points": 4})
     summarize = _call("text_summarize", {"text": corpus, "max_sentences": 2})
@@ -424,13 +420,11 @@ def test_text_distillation_quality_checks_on_logs() -> None:
 
 
 def test_text_distillation_quality_checks_on_prose() -> None:
-    corpus = "\n".join(
-        [
-            "The release candidate ships with a smaller bundle and faster startup.",
-            "We are deprecating the legacy migration path in favor of the new workflow.",
-            "This note contains extra background that should be less important.",
-            "The migration guide highlights compatibility and rollout steps.",
-        ]
+    corpus = _join_lines(
+        "The release candidate ships with a smaller bundle and faster startup.",
+        "We are deprecating the legacy migration path in favor of the new workflow.",
+        "This note contains extra background that should be less important.",
+        "The migration guide highlights compatibility and rollout steps.",
     )
     compact = _call("text_compact", {"text": corpus, "max_points": 3, "include_patterns": ["migration", "release"]})
     summarize = _call("text_summarize", {"text": corpus, "max_sentences": 2})
@@ -640,6 +634,62 @@ def test_apply_text_patch_workspace_root_policy(tmp_path: Path) -> None:
     assert details.get("type") == "path-outside-root"
 
 
+def test_apply_text_patch_relative_path(tmp_path: Path) -> None:
+    root = tmp_path / "workspace"
+    root.mkdir()
+    (root / "sub").mkdir()
+    target = root / "sub" / "file.txt"
+    target.write_text("hello\nworld\n", encoding="utf-8")
+
+    result = _call(
+        "apply_text_patch",
+        {
+            "path": "sub/file.txt",
+            "workspace_root": str(root),
+            "edits": [{"start_line": 1, "end_line": 1, "content": "HELLO"}],
+        },
+    )
+    assert isinstance(result, dict)
+    assert "error" not in result
+    assert target.read_text(encoding="utf-8") == "HELLO\nworld\n"
+
+
+def test_apply_text_patch_batch_relative_path(tmp_path: Path) -> None:
+    root = tmp_path / "workspace"
+    root.mkdir()
+    first = root / "a.txt"
+    first.write_text("x\n", encoding="utf-8")
+
+    result = _call(
+        "apply_text_patch_batch",
+        {
+            "workspace_root": str(root),
+            "patches": [
+                {
+                    "path": "a.txt",
+                    "edits": [{"start_line": 1, "end_line": 1, "content": "X"}],
+                }
+            ],
+        },
+    )
+    assert isinstance(result, dict)
+    assert "error" not in result
+    assert result.get("applied") == 1
+    assert first.read_text(encoding="utf-8") == "X\n"
+
+
+def test_symbol_search_invalid_kind_message(tmp_path: Path) -> None:
+    target = tmp_path / "module.py"
+    target.write_text("def run():\n    pass\n", encoding="utf-8")
+    for bad_kind in ("fn", "enum", "variant"):
+        result = _call("symbol_search", {"paths": [str(target)], "kinds": [bad_kind]})
+        assert isinstance(result, dict)
+        assert "error" in result
+        assert "function" in result["error"]
+        assert "class" in result["error"]
+        assert "variable" in result["error"]
+
+
 def test_apply_text_patch_workspace_root_required(tmp_path: Path) -> None:
     target = tmp_path / "required.txt"
     target.write_text("a\n", encoding="utf-8")
@@ -689,16 +739,14 @@ def test_apply_text_patch_batch(tmp_path: Path) -> None:
 def test_symbol_search_python_symbols(tmp_path: Path) -> None:
     target = tmp_path / "module.py"
     target.write_text(
-        "\n".join(
-            [
-                "VALUE = 1",
-                "",
-                "class Runner:",
-                "    pass",
-                "",
-                "def run_task(arg: str) -> str:",
-                "    return arg",
-            ]
+        _join_lines(
+            "VALUE = 1",
+            "",
+            "class Runner:",
+            "    pass",
+            "",
+            "def run_task(arg: str) -> str:",
+            "    return arg",
         ),
         encoding="utf-8",
     )
@@ -722,15 +770,13 @@ def test_symbol_search_invalid_kind(tmp_path: Path) -> None:
 def test_symbol_search_truncation(tmp_path: Path) -> None:
     target = tmp_path / "many.py"
     target.write_text(
-        "\n".join(
-            [
-                "def one():",
-                "    return 1",
-                "def two():",
-                "    return 2",
-                "def three():",
-                "    return 3",
-            ]
+        _join_lines(
+            "def one():",
+            "    return 1",
+            "def two():",
+            "    return 2",
+            "def three():",
+            "    return 3",
         ),
         encoding="utf-8",
     )
@@ -758,42 +804,34 @@ def test_symbol_search_cache_invalidation(tmp_path: Path) -> None:
 def test_symbol_search_javascript_and_typescript(tmp_path: Path) -> None:
     js_file = tmp_path / "mod.js"
     js_file.write_text(
-        "\n".join(
-            [
-                "export function buildClient() { return {}; }",
-                "export class Worker {}",
-                "const timeoutMs = 1000",
-            ]
+        _join_lines(
+            "export function buildClient() { return {}; }",
+            "export class Worker {}",
+            "const timeoutMs = 1000",
         ),
         encoding="utf-8",
     )
     jsx_file = tmp_path / "view.jsx"
     jsx_file.write_text(
-        "\n".join(
-            [
-                "export function RenderView() { return <div />; }",
-                "export const jsxValue = 1;",
-            ]
+        _join_lines(
+            "export function RenderView() { return <div />; }",
+            "export const jsxValue = 1;",
         ),
         encoding="utf-8",
     )
     ts_file = tmp_path / "mod.ts"
     ts_file.write_text(
-        "\n".join(
-            [
-                "export const runTask = async () => true;",
-                "class TaskRunner {}",
-            ]
+        _join_lines(
+            "export const runTask = async () => true;",
+            "class TaskRunner {}",
         ),
         encoding="utf-8",
     )
     tsx_file = tmp_path / "panel.tsx"
     tsx_file.write_text(
-        "\n".join(
-            [
-                "export function RenderPanel() { return <section />; }",
-                "const tsxValue = 2;",
-            ]
+        _join_lines(
+            "export function RenderPanel() { return <section />; }",
+            "const tsxValue = 2;",
         ),
         encoding="utf-8",
     )
@@ -817,14 +855,12 @@ def test_symbol_search_javascript_and_typescript(tmp_path: Path) -> None:
 def test_symbol_search_references_and_metadata(tmp_path: Path) -> None:
     source = tmp_path / "refs.py"
     source.write_text(
-        "\n".join(
-            [
-                "def build_client():",
-                "    return 1",
-                "",
-                "x = build_client()",
-                "print(build_client())",
-            ]
+        _join_lines(
+            "def build_client():",
+            "    return 1",
+            "",
+            "x = build_client()",
+            "print(build_client())",
         ),
         encoding="utf-8",
     )
@@ -854,14 +890,12 @@ def test_symbol_search_references_and_metadata(tmp_path: Path) -> None:
 def test_symbol_search_callsites(tmp_path: Path) -> None:
     source = tmp_path / "calls.py"
     source.write_text(
-        "\n".join(
-            [
-                "def compute_value(x):",
-                "    return x + 1",
-                "",
-                "result = compute_value(3)",
-                "print(compute_value(4))",
-            ]
+        _join_lines(
+            "def compute_value(x):",
+            "    return x + 1",
+            "",
+            "result = compute_value(3)",
+            "print(compute_value(4))",
         ),
         encoding="utf-8",
     )
@@ -891,27 +925,23 @@ def test_symbol_search_callsites(tmp_path: Path) -> None:
 def test_symbol_search_callgraph(tmp_path: Path) -> None:
     py_file = tmp_path / "graph.py"
     py_file.write_text(
-        "\n".join(
-            [
-                "def helper():",
-                "    return 1",
-                "",
-                "def run():",
-                "    return helper()",
-                "",
-                "value = helper()",
-            ]
+        _join_lines(
+            "def helper():",
+            "    return 1",
+            "",
+            "def run():",
+            "    return helper()",
+            "",
+            "value = helper()",
         ),
         encoding="utf-8",
     )
     js_file = tmp_path / "graph.js"
     js_file.write_text(
-        "\n".join(
-            [
-                "function api() { return 1; }",
-                "function main() { return api(); }",
-                "const top = api();",
-            ]
+        _join_lines(
+            "function api() { return 1; }",
+            "function main() { return api(); }",
+            "const top = api();",
         ),
         encoding="utf-8",
     )
@@ -989,12 +1019,10 @@ def test_symbol_search_callgraph(tmp_path: Path) -> None:
 
     js_quirks = tmp_path / "quirks.js"
     js_quirks.write_text(
-        "\n".join(
-            [
-                'function outer() { const msg = "use { brace }"; return msg; }',
-                "const topLevel = helper();",
-                "function helper() { return 1; }",
-            ]
+        _join_lines(
+            'function outer() { const msg = "use { brace }"; return msg; }',
+            "const topLevel = helper();",
+            "function helper() { return 1; }",
         ),
         encoding="utf-8",
     )
@@ -1018,14 +1046,12 @@ def test_symbol_search_callgraph(tmp_path: Path) -> None:
 
     js_regex = tmp_path / "regex.js"
     js_regex.write_text(
-        "\n".join(
-            [
-                "function compute() {",
-                "  const r = /pattern}/;",
-                "  return helper();",
-                "}",
-                "function helper() { return 1; }",
-            ]
+        _join_lines(
+            "function compute() {",
+            "  const r = /pattern}/;",
+            "  return helper();",
+            "}",
+            "function helper() { return 1; }",
         ),
         encoding="utf-8",
     )
