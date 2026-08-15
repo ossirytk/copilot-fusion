@@ -5,8 +5,8 @@ from __future__ import annotations
 import difflib
 import re
 
-from fastmcp import FastMCP
 from copilot_fusion_shared import resolve_path, run_command
+from fastmcp import FastMCP
 
 
 def _parse_unified_diff(diff_text: str) -> list[dict[str, object]]:

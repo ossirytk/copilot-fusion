@@ -6,7 +6,6 @@ from dataclasses import dataclass
 
 from copilot_fusion_shared import FusionConfig
 
-
 CONTEXTWELL_TOOLS = {
     "remember",
     "recall",

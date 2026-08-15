@@ -13,8 +13,8 @@ from typing import Any
 from urllib.error import HTTPError, URLError
 from urllib.request import Request, urlopen
 
-from fastmcp import FastMCP
 from copilot_fusion_shared import resolve_path
+from fastmcp import FastMCP
 
 try:
     import tomllib

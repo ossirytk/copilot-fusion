@@ -301,7 +301,7 @@ def test_text_summarize_remote_backend(monkeypatch) -> None:
     request_state: dict[str, object] = {}
 
     class Handler(BaseHTTPRequestHandler):
-        def do_POST(self) -> None:  # noqa: N802
+        def do_POST(self) -> None:
             length = int(self.headers.get("Content-Length", "0"))
             payload = self.rfile.read(length).decode("utf-8")
             request_state["payload"] = json.loads(payload)
@@ -319,7 +319,7 @@ def test_text_summarize_remote_backend(monkeypatch) -> None:
             self.end_headers()
             self.wfile.write(body)
 
-        def log_message(self, format: str, *args: object) -> None:  # noqa: A003
+        def log_message(self, format: str, *args: object) -> None:
             return
 
     server = ThreadingHTTPServer(("127.0.0.1", 0), Handler)
@@ -343,7 +343,7 @@ def test_text_summarize_remote_backend(monkeypatch) -> None:
 
 def test_text_summarize_remote_backend_non_utf8(monkeypatch) -> None:
     class Handler(BaseHTTPRequestHandler):
-        def do_POST(self) -> None:  # noqa: N802
+        def do_POST(self) -> None:
             body = b"\x80\x81"
             self.send_response(200)
             self.send_header("Content-Type", "application/json")
@@ -351,7 +351,7 @@ def test_text_summarize_remote_backend_non_utf8(monkeypatch) -> None:
             self.end_headers()
             self.wfile.write(body)
 
-        def log_message(self, format: str, *args: object) -> None:  # noqa: A003
+        def log_message(self, format: str, *args: object) -> None:
             return
 
     server = ThreadingHTTPServer(("127.0.0.1", 0), Handler)
@@ -370,7 +370,7 @@ def test_text_summarize_remote_backend_non_utf8(monkeypatch) -> None:
 
 def test_text_summarize_auto_prefers_remote(monkeypatch) -> None:
     class Handler(BaseHTTPRequestHandler):
-        def do_POST(self) -> None:  # noqa: N802
+        def do_POST(self) -> None:
             body = json.dumps({"summary": "auto remote", "bullets": ["one"], "stats": {}}).encode("utf-8")
             self.send_response(200)
             self.send_header("Content-Type", "application/json")
@@ -378,7 +378,7 @@ def test_text_summarize_auto_prefers_remote(monkeypatch) -> None:
             self.end_headers()
             self.wfile.write(body)
 
-        def log_message(self, format: str, *args: object) -> None:  # noqa: A003
+        def log_message(self, format: str, *args: object) -> None:
             return
 
     server = ThreadingHTTPServer(("127.0.0.1", 0), Handler)
