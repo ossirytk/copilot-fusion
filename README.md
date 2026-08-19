@@ -42,6 +42,43 @@ Initial migration is active:
 - `contextwell-tools` exports filesystem/code tools (`fs_glob`, `fs_tree`, `text_search`, `text_compact`, `text_summarize`, `apply_text_patch`, `apply_text_patch_batch`, `symbol_search`, `read_file`, `json_select`, `yaml_select`, `file_hash`, `server_stats`)
 - `contextwell-diff` exports structured diff tools (`diff_staged`, `diff_refs`, `diff_files`, `summarize_diff`)
 
+## Tool Surface Guide
+
+The full tool count is intentionally kept small. This section distinguishes the **preferred** minimal surface from **legacy aliases** that are retained for compatibility.
+
+### Preferred tools
+
+Reach for these tools first. They cover the common workflows with the least overlap.
+
+| Group | Tools |
+|---|---|
+| Memory | `remember`, `recall`, `list_memories`, `forget`, `update` |
+| File inspection | `fs_glob`, `fs_tree`, `read_file` |
+| Search & navigation | `text_search`, `symbol_search` |
+| Text distillation | `text_compact`, `text_summarize` |
+| Editing | `apply_text_patch` |
+| Git | `git_status`, `git_commit`, `git_log`, `git_show`, `git_branch`, `git_fetch`, `git_pull`, `git_push` |
+| GitHub | `gh_pr_create`, `gh_pr_list`, `gh_pr_view`, `gh_issue_create`, `gh_issue_list`, `gh_issue_view` |
+| Structured diff | `diff_staged`, `diff_refs`, `summarize_diff` |
+| Server | `fusion_health`, `fusion_api_compat` |
+
+### Legacy aliases (compatibility only)
+
+These tools are present but have a preferred alternative for common use cases.
+
+| Legacy tool | Preferred alternative | Notes |
+|---|---|---|
+| `git_diff` | `diff_staged` or `diff_refs` | Legacy raw diff; prefer structured diff-domain tools for parsed output |
+| `diff_files` | `diff_refs` | `diff_refs` with a path filter is more explicit |
+| `remember_file` | `read_file` + `remember` | Convenience wrapper; explicit two-step is clearer |
+| `remember_batch` | `remember` | Useful for bulk imports; not a primary workflow tool |
+| `apply_text_patch_batch` | `apply_text_patch` | Use batch form only when multi-file atomicity is needed |
+| `json_select` | `read_file` | `read_file` covers most structured-data reads |
+| `yaml_select` | `read_file` | `read_file` covers most structured-data reads |
+
+`fusion_api_compat` returns both `preferred_surface` and `legacy_aliases` at runtime so agents can
+always discover the current classification.
+
 ## Configuration
 
 Domain registration can be controlled with environment variables:
@@ -72,7 +109,7 @@ Base MCP config example is provided in `mcp-config.example.json`.
 |---|---|---|
 | `contextwell` | Full initial surface | Implemented in `contextwell-core` domain |
 | `gitpilot` | Full initial surface | Implemented in `contextwell-git` domain |
-| `toolpilot` | Full initial surface | Implemented in `contextwell-tools` domain (with `git_log` routed via merged git domain) |
+| `toolpilot` | Full initial surface | Implemented in `contextwell-tools` domain |
 | `diffpilot` | Full initial surface | Implemented in `contextwell-diff` domain |
 
 ## Optional Tools Strategy
