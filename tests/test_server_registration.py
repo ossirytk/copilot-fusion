@@ -67,3 +67,33 @@ def test_api_compat_matrix_reports_known_gaps() -> None:
     assert domains["contextwell"]["missing"] == []
     assert domains["gitpilot"]["missing"] == []
     assert domains["toolpilot"]["missing"] == []
+
+
+def test_api_compat_matrix_preferred_surface() -> None:
+    async def _read() -> dict[str, object]:
+        server = create_server()
+        result = await server.call_tool("fusion_api_compat", {})
+        return dict(result.structured_content)
+
+    matrix = asyncio.run(_read())
+    preferred = matrix["preferred_surface"]
+    assert isinstance(preferred, list)
+    # Core preferred tools are present.
+    for tool in ("remember", "recall", "git_status", "fs_glob", "read_file", "diff_staged"):
+        assert tool in preferred, f"expected {tool!r} in preferred_surface"
+
+
+def test_api_compat_matrix_legacy_aliases() -> None:
+    async def _read() -> dict[str, object]:
+        server = create_server()
+        result = await server.call_tool("fusion_api_compat", {})
+        return dict(result.structured_content)
+
+    matrix = asyncio.run(_read())
+    legacy = matrix["legacy_aliases"]
+    assert isinstance(legacy, dict)
+    # Legacy aliases that are registered must map to a preferred alternative string.
+    for name, alt in legacy.items():
+        assert isinstance(alt, str) and alt, f"empty alternative for legacy alias {name!r}"
+    # git_diff is present and flagged as legacy.
+    assert "git_diff" in legacy
