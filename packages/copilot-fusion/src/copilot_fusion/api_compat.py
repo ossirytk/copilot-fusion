@@ -79,7 +79,7 @@ PREFERRED_SURFACE: set[str] = {
     "recall",
     "list_memories",
     "forget",
-    "update",
+    "update",  # memory update; registered as "update" in contextwell-core
     # file inspection
     "fs_glob",
     "fs_tree",
@@ -159,6 +159,8 @@ def active_tool_names(config: FusionConfig) -> set[str]:
     if config.enable_tools:
         names.update(TOOLPILOT_TOOLS)
         names.add("fusion_tools_health")
+        # git_log is NOT in TOOLPILOT_TOOLS; it is exclusively registered by the
+        # git domain (GITPILOT_TOOLS) to avoid duplicate registration.
     if config.enable_diff:
         names.update(CONTEXTWELL_DIFF_TOOLS)
         names.add("fusion_diff_health")

@@ -56,13 +56,17 @@ def test_env_config_is_respected(monkeypatch: MonkeyPatch) -> None:
     assert "git_status" not in names
 
 
-def test_api_compat_matrix_reports_known_gaps() -> None:
+def _read_compat_matrix() -> dict[str, object]:
     async def _read() -> dict[str, object]:
         server = create_server()
         result = await server.call_tool("fusion_api_compat", {})
         return dict(result.structured_content)
 
-    matrix = asyncio.run(_read())
+    return asyncio.run(_read())
+
+
+def test_api_compat_matrix_reports_known_gaps() -> None:
+    matrix = _read_compat_matrix()
     domains = matrix["domains"]
     assert domains["contextwell"]["missing"] == []
     assert domains["gitpilot"]["missing"] == []
@@ -70,12 +74,7 @@ def test_api_compat_matrix_reports_known_gaps() -> None:
 
 
 def test_api_compat_matrix_preferred_surface() -> None:
-    async def _read() -> dict[str, object]:
-        server = create_server()
-        result = await server.call_tool("fusion_api_compat", {})
-        return dict(result.structured_content)
-
-    matrix = asyncio.run(_read())
+    matrix = _read_compat_matrix()
     preferred = matrix["preferred_surface"]
     assert isinstance(preferred, list)
     # Core preferred tools are present.
@@ -84,12 +83,7 @@ def test_api_compat_matrix_preferred_surface() -> None:
 
 
 def test_api_compat_matrix_legacy_aliases() -> None:
-    async def _read() -> dict[str, object]:
-        server = create_server()
-        result = await server.call_tool("fusion_api_compat", {})
-        return dict(result.structured_content)
-
-    matrix = asyncio.run(_read())
+    matrix = _read_compat_matrix()
     legacy = matrix["legacy_aliases"]
     assert isinstance(legacy, dict)
     # Legacy aliases that are registered must map to a preferred alternative string.
