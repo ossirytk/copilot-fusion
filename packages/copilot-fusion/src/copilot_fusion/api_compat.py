@@ -45,7 +45,7 @@ GITPILOT_TOOLS = {
 }
 
 # Full toolpilot surface as registered in contextwell-tools.
-# Note: git_log is routed via the git domain when both domains are active.
+# Note: git_log is exclusively registered by the git domain (contextwell-git).
 TOOLPILOT_TOOLS = {
     "fs_glob",
     "fs_tree",
