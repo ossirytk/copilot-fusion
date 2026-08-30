@@ -1,0 +1,6 @@
+[[language]]
+name = "python"
+language-servers = [
+  { name = "pyrefly", except-features = ["rename-symbol"] },
+  "ruff",
+]
