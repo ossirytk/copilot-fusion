@@ -1,6 +1,23 @@
 [[language]]
 name = "python"
+auto-format = true
+
+formatter = { command = "ruff", args = ["format", "-"] }
+
 language-servers = [
-  { name = "pyrefly", except-features = ["rename-symbol"] },
   "ruff",
+  "basedpyright",
+  "pyrefly"
 ]
+
+[language-server.ruff]
+command = "ruff"
+args = ["server"]
+
+[language-server.basedpyright]
+command = "basedpyright-langserver"
+args = ["--stdio"]
+
+[language-server.pyrefly]
+command = "pyrefly"
+args = ["lsp"]
