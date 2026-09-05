@@ -200,7 +200,11 @@ def git_tag(
     result = run_git(["tag", "--list"], path)
     if "error" in result:
         return result
-    return ok_payload(path=result["cwd"], tags=[line for line in str(result["stdout"]).splitlines() if line])
+    return ok_payload(
+        path=result["cwd"],
+        tags=[line for line in str(result["stdout"]).splitlines() if line],
+        backend="git",
+    )
 
 
 def git_remote(path: str = ".", add_name: str = "", add_url: str = "", remove: str = "") -> dict[str, object]:
