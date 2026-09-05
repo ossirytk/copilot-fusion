@@ -2,9 +2,10 @@
 
 ## Status
 
-- Proposed design for unified Git & Jujutsu (jj) VCS tooling under `contextwell-git`.
-- Plain Git workflow tools are currently implemented in `packages/contextwell-git/src/contextwell_git/registry.py`.
-- Colocated repository detection and JJ translation adapter are pending implementation.
+- Implemented unified Git & Jujutsu (jj) VCS tooling under `contextwell-git`.
+- Colocated repository detection and JJ translation adapter are active across all Git MCP tools (`git_status`, `git_commit`, `git_diff`, `git_log`, `git_show`, `git_branch`, `git_merge`, `git_stash`, `git_reset`, `git_tag`, `git_remote`, `git_fetch`, `git_pull`, `git_push`).
+- Health reporting via `fusion_git_health` verifies JJ presence and default backend.
+- End-to-end integration and unit test suite verified under `tests/test_jujutsu_colocation.py`.
 
 ---
 

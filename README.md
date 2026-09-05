@@ -38,7 +38,7 @@ The merged domains had overlap in command execution, path handling, and tool reg
 Initial migration is active:
 
 - `contextwell-core` exports memory tools (`remember`, `recall`, `list_memories`, etc.)
-- `contextwell-git` exports git and gh tools (`git_*`, `gh_*`)
+- `contextwell-git` exports unified VCS tools supporting Git and Jujutsu (`jj`) in colocated repositories, plus GitHub CLI helpers (`git_*`, `gh_*`)
 - `contextwell-tools` exports filesystem/code tools (`fs_glob`, `fs_tree`, `text_search`, `text_compact`, `text_summarize`, `apply_text_patch`, `apply_text_patch_batch`, `symbol_search`, `read_file`, `json_select`, `yaml_select`, `file_hash`, `server_stats`)
 - `contextwell-diff` exports structured diff tools (`diff_staged`, `diff_refs`, `diff_files`, `summarize_diff`)
 
@@ -133,6 +133,7 @@ The next feature tracks are being implemented one at a time:
 - text distillation / compaction (phase 1 `text_compact`, phase 2 local extractive `text_summarize`, phase 3 remote/model-backed `text_summarize` via `FUSION_TEXT_SUMMARIZER_URL`, optional summary entities, and optional `read_file` compact mode are implemented)
 - safe file editing (phase 1 guarded `apply_text_patch` + phase 2 richer edit ops/diagnostics + structured previews + multi-file batch editing are implemented)
 - code navigation / symbol awareness (phase 1 Python + phase 2 JS/TS/JSX/TSX coverage, callsite references, caller/callee callgraph extraction, and mtime-based file caching in `symbol_search` are implemented)
+- unified VCS with Jujutsu (jj) colocation (automatic `.jj` workspace detection, semantic mapping of `git_*` operations to native `jj` commands, first-class conflict metadata, and `fusion_git_health` status reporting are implemented)
 
 ## Copilot skill guidance
 

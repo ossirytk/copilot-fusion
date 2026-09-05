@@ -1,37 +1,29 @@
-"""Git tool registration for copilot-fusion.
-
-This is an initial migration from gitpilot focused on preserving tool names and
-high-utility behavior.
-"""
+"""Git and Jujutsu (jj) tool registration for copilot-fusion."""
 
 from __future__ import annotations
 
-from copilot_fusion_shared import resolve_path, run_command
 from fastmcp import FastMCP
 
+from contextwell_git.detection import detect_vcs_backend, is_jj_available
+from contextwell_git.jj_adapter import (
+    jj_branch,
+    jj_commit,
+    jj_diff,
+    jj_fetch,
+    jj_log,
+    jj_merge,
+    jj_pull,
+    jj_push,
+    jj_remote,
+    jj_reset,
+    jj_show,
+    jj_stash,
+    jj_status,
+    jj_tag,
+)
+from contextwell_git.runner import err_payload, ok_payload, run_gh, run_git
 
-def _ok(**payload: object) -> dict[str, object]:
-    return payload
-
-
-def _err(message: str) -> dict[str, object]:
-    return {"error": message}
-
-
-def _run_git(args: list[str], path: str = ".") -> dict[str, object]:
-    cwd = resolve_path(path)
-    result = run_command(["git", *args], cwd)
-    if not result.ok:
-        return _err(result.stderr.strip() or f"git {' '.join(args)} failed")
-    return _ok(cwd=str(cwd), stdout=result.stdout, stderr=result.stderr)
-
-
-def _run_gh(args: list[str], path: str = ".") -> dict[str, object]:
-    cwd = resolve_path(path)
-    result = run_command(["gh", *args], cwd)
-    if not result.ok:
-        return _err(result.stderr.strip() or f"gh {' '.join(args)} failed")
-    return _ok(cwd=str(cwd), stdout=result.stdout, stderr=result.stderr)
+_VALID_MODES = {"soft", "mixed", "hard", "merge", "keep"}
 
 
 def register(mcp: FastMCP) -> None:
@@ -39,33 +31,39 @@ def register(mcp: FastMCP) -> None:
 
     @mcp.tool
     def git_status(path: str = ".") -> dict[str, object]:
-        result = _run_git(["status", "--short", "--branch"], path)
+        if detect_vcs_backend(path) == "jj":
+            return jj_status(path)
+        result = run_git(["status", "--short", "--branch"], path)
         if "error" in result:
             return result
-        return _ok(path=result["cwd"], status=str(result["stdout"]).strip())
+        return ok_payload(path=result["cwd"], status=str(result["stdout"]).strip(), backend="git")
 
     @mcp.tool
     def git_diff(path: str = ".", staged: bool = False, file: str = "") -> dict[str, object]:
+        if detect_vcs_backend(path) == "jj":
+            return jj_diff(path=path, staged=staged, file=file)
         args = ["diff"]
         if staged:
             args.append("--staged")
         if file:
             args.extend(["--", file])
-        result = _run_git(args, path)
+        result = run_git(args, path)
         if "error" in result:
             return result
-        return _ok(path=result["cwd"], diff=result["stdout"])
+        return ok_payload(path=result["cwd"], diff=result["stdout"], backend="git")
 
     @mcp.tool
     def git_commit(message: str, path: str = ".", add_all: bool = False) -> dict[str, object]:
+        if detect_vcs_backend(path) == "jj":
+            return jj_commit(message=message, path=path, add_all=add_all)
         if add_all:
-            staged = _run_git(["add", "-A"], path)
+            staged = run_git(["add", "-A"], path)
             if "error" in staged:
                 return staged
-        result = _run_git(["commit", "-m", message], path)
+        result = run_git(["commit", "-m", message], path)
         if "error" in result:
             return result
-        return _ok(path=result["cwd"], output=str(result["stdout"]).strip())
+        return ok_payload(path=result["cwd"], output=str(result["stdout"]).strip(), backend="git")
 
     @mcp.tool
     def git_log(
@@ -80,8 +78,20 @@ def register(mcp: FastMCP) -> None:
         max_results: int = 100,
         path_filter: str = "",
     ) -> dict[str, object]:
-        # Compatibility bridge: accept toolpilot-style parameters as well.
         effective_path = repo_path or path
+        if detect_vcs_backend(effective_path) == "jj":
+            return jj_log(
+                path=path,
+                limit=limit,
+                oneline=oneline,
+                branch=branch,
+                author=author,
+                file=file,
+                include_diff_stat=include_diff_stat,
+                repo_path=repo_path,
+                max_results=max_results,
+                path_filter=path_filter,
+            )
         effective_limit = max_results if repo_path else limit
         effective_file = path_filter or file
         fmt = "%h %s" if oneline else "%H%x1f%an%x1f%ae%x1f%ad%x1f%s"
@@ -94,18 +104,20 @@ def register(mcp: FastMCP) -> None:
             args.append("--name-only")
         if effective_file:
             args.extend(["--", effective_file])
-        result = _run_git(args, effective_path)
+        result = run_git(args, effective_path)
         if "error" in result:
             return result
         raw = str(result["stdout"]).strip()
-        return _ok(path=result["cwd"], raw=raw, truncated=effective_limit > 500)
+        return ok_payload(path=result["cwd"], raw=raw, backend="git", truncated=effective_limit > 500)
 
     @mcp.tool
     def git_show(ref: str = "HEAD", path: str = ".") -> dict[str, object]:
-        result = _run_git(["show", "--stat", "--patch", ref], path)
+        if detect_vcs_backend(path) == "jj":
+            return jj_show(ref=ref, path=path)
+        result = run_git(["show", "--stat", "--patch", ref], path)
         if "error" in result:
             return result
-        return _ok(path=result["cwd"], show=result["stdout"])
+        return ok_payload(path=result["cwd"], show=result["stdout"], backend="git")
 
     @mcp.tool
     def git_branch(
@@ -115,39 +127,45 @@ def register(mcp: FastMCP) -> None:
         delete: str | None = None,
         remote: bool = False,
     ) -> dict[str, object]:
+        if detect_vcs_backend(path) == "jj":
+            return jj_branch(path=path, create=create, switch=switch, delete=delete, remote=remote)
         if create:
-            return _run_git(["switch", "-c", create], path)
+            return run_git(["switch", "-c", create], path)
         if switch:
-            return _run_git(["switch", switch], path)
+            return run_git(["switch", switch], path)
         if delete:
-            return _run_git(["branch", "-d", delete], path)
+            return run_git(["branch", "-d", delete], path)
         args = ["branch"]
         if remote:
             args.append("-a")
-        result = _run_git(args, path)
+        result = run_git(args, path)
         if "error" in result:
             return result
         branches = [line.strip() for line in str(result["stdout"]).splitlines() if line.strip()]
-        return _ok(path=result["cwd"], branches=branches)
+        return ok_payload(path=result["cwd"], branches=branches, backend="git")
 
     @mcp.tool
     def git_merge(branch: str, path: str = ".", no_ff: bool = False, message: str = "") -> dict[str, object]:
+        if detect_vcs_backend(path) == "jj":
+            return jj_merge(branch=branch, path=path, no_ff=no_ff, message=message)
         args = ["merge"]
         if no_ff:
             args.append("--no-ff")
         if message:
             args.extend(["-m", message])
         args.append(branch)
-        return _run_git(args, path)
+        return run_git(args, path)
 
     @mcp.tool
     def git_stash(path: str = ".", pop: bool = False, message: str = "") -> dict[str, object]:
+        if detect_vcs_backend(path) == "jj":
+            return jj_stash(path=path, pop=pop, message=message)
         if pop:
-            return _run_git(["stash", "pop"], path)
+            return run_git(["stash", "pop"], path)
         args = ["stash", "push"]
         if message:
             args.extend(["-m", message])
-        return _run_git(args, path)
+        return run_git(args, path)
 
     @mcp.tool
     def git_reset(
@@ -156,12 +174,13 @@ def register(mcp: FastMCP) -> None:
         mode: str = "mixed",
         files: list[str] | None = None,
     ) -> dict[str, object]:
-        _VALID_MODES = {"soft", "mixed", "hard", "merge", "keep"}
         if mode not in _VALID_MODES:
-            return _err(f"Invalid mode {mode!r}. Must be one of: {', '.join(sorted(_VALID_MODES))}")
+            return err_payload(f"Invalid mode {mode!r}. Must be one of: {', '.join(sorted(_VALID_MODES))}")
+        if detect_vcs_backend(path) == "jj":
+            return jj_reset(path=path, ref=ref, mode=mode, files=files)
         if files:
-            return _run_git(["reset", ref, "--", *files], path)
-        return _run_git(["reset", f"--{mode}", ref], path)
+            return run_git(["reset", ref, "--", *files], path)
+        return run_git(["reset", f"--{mode}", ref], path)
 
     @mcp.tool
     def git_tag(
@@ -171,46 +190,54 @@ def register(mcp: FastMCP) -> None:
         ref: str = "HEAD",
         message: str = "",
     ) -> dict[str, object]:
+        if detect_vcs_backend(path) == "jj":
+            return jj_tag(path=path, create=create, delete=delete, ref=ref, message=message)
         if create:
             args = ["tag"]
             if message:
                 args.extend(["-a", create, "-m", message, ref])
             else:
                 args.extend([create, ref])
-            return _run_git(args, path)
+            return run_git(args, path)
         if delete:
-            return _run_git(["tag", "-d", delete], path)
-        result = _run_git(["tag", "--list"], path)
+            return run_git(["tag", "-d", delete], path)
+        result = run_git(["tag", "--list"], path)
         if "error" in result:
             return result
-        return _ok(path=result["cwd"], tags=[line for line in str(result["stdout"]).splitlines() if line])
+        return ok_payload(path=result["cwd"], tags=[line for line in str(result["stdout"]).splitlines() if line])
 
     @mcp.tool
     def git_remote(path: str = ".", add_name: str = "", add_url: str = "", remove: str = "") -> dict[str, object]:
+        if detect_vcs_backend(path) == "jj":
+            return jj_remote(path=path, add_name=add_name, add_url=add_url, remove=remove)
         if add_name:
-            return _run_git(["remote", "add", add_name, add_url], path)
+            return run_git(["remote", "add", add_name, add_url], path)
         if remove:
-            return _run_git(["remote", "remove", remove], path)
-        result = _run_git(["remote", "-v"], path)
+            return run_git(["remote", "remove", remove], path)
+        result = run_git(["remote", "-v"], path)
         if "error" in result:
             return result
-        return _ok(path=result["cwd"], remotes=str(result["stdout"]).strip())
+        return ok_payload(path=result["cwd"], remotes=str(result["stdout"]).strip())
 
     @mcp.tool
     def git_fetch(path: str = ".", remote: str = "origin", prune: bool = False) -> dict[str, object]:
+        if detect_vcs_backend(path) == "jj":
+            return jj_fetch(path=path, remote=remote, prune=prune)
         args = ["fetch", remote]
         if prune:
             args.append("--prune")
-        return _run_git(args, path)
+        return run_git(args, path)
 
     @mcp.tool
     def git_pull(path: str = ".", remote: str = "origin", branch: str = "", rebase: bool = False) -> dict[str, object]:
+        if detect_vcs_backend(path) == "jj":
+            return jj_pull(path=path, remote=remote, branch=branch, rebase=rebase)
         args = ["pull", remote]
         if branch:
             args.append(branch)
         if rebase:
             args.append("--rebase")
-        return _run_git(args, path)
+        return run_git(args, path)
 
     @mcp.tool
     def git_push(
@@ -221,6 +248,15 @@ def register(mcp: FastMCP) -> None:
         set_upstream: bool = False,
         tags: bool = False,
     ) -> dict[str, object]:
+        if detect_vcs_backend(path) == "jj":
+            return jj_push(
+                path=path,
+                remote=remote,
+                branch=branch,
+                force=force,
+                set_upstream=set_upstream,
+                tags=tags,
+            )
         args = ["push", remote]
         if branch:
             args.append(branch)
@@ -230,7 +266,7 @@ def register(mcp: FastMCP) -> None:
             args.append("-u")
         if tags:
             args.append("--tags")
-        return _run_git(args, path)
+        return run_git(args, path)
 
     @mcp.tool
     def gh_pr_create(
@@ -245,7 +281,7 @@ def register(mcp: FastMCP) -> None:
             args.extend(["--body", body])
         if draft:
             args.append("--draft")
-        return _run_gh(args, path)
+        return run_gh(args, path)
 
     @mcp.tool
     def gh_pr_list(
@@ -263,11 +299,11 @@ def register(mcp: FastMCP) -> None:
             args.extend(["--author", author])
         if label:
             args.extend(["--label", label])
-        return _run_gh(args, path)
+        return run_gh(args, path)
 
     @mcp.tool
     def gh_pr_view(pr: str, path: str = ".") -> dict[str, object]:
-        return _run_gh(["pr", "view", pr], path)
+        return run_gh(["pr", "view", pr], path)
 
     @mcp.tool
     def gh_issue_create(
@@ -284,7 +320,7 @@ def register(mcp: FastMCP) -> None:
             args.extend(["--label", label])
         if assignee:
             args.extend(["--assignee", assignee])
-        return _run_gh(args, path)
+        return run_gh(args, path)
 
     @mcp.tool
     def gh_issue_list(
@@ -302,12 +338,18 @@ def register(mcp: FastMCP) -> None:
             args.extend(["--assignee", assignee])
         if author:
             args.extend(["--author", author])
-        return _run_gh(args, path)
+        return run_gh(args, path)
 
     @mcp.tool
     def gh_issue_view(issue: str, path: str = ".") -> dict[str, object]:
-        return _run_gh(["issue", "view", issue], path)
+        return run_gh(["issue", "view", issue], path)
 
     @mcp.tool(name="fusion_git_health")
-    def fusion_git_health() -> dict[str, str]:
-        return {"domain": "git", "status": "ready"}
+    def fusion_git_health() -> dict[str, object]:
+        jj_avail = is_jj_available()
+        return {
+            "domain": "git",
+            "status": "ready",
+            "jj_available": jj_avail,
+            "default_backend": "jj" if jj_avail else "git",
+        }
