@@ -38,4 +38,8 @@ select = [
     "B",
     "C90",
 ]
-ignore = ["E501", "C901"]
+ignore = ["E501"]
+
+[tool.ruff.lint.mccabe]
+# Set the maximum allowed complexity (default is 10)
+max-complexity = 15
