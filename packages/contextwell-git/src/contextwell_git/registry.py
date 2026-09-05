@@ -217,7 +217,7 @@ def git_remote(path: str = ".", add_name: str = "", add_url: str = "", remove: s
     result = run_git(["remote", "-v"], path)
     if "error" in result:
         return result
-    return ok_payload(path=result["cwd"], remotes=str(result["stdout"]).strip())
+    return ok_payload(path=result["cwd"], remotes=str(result["stdout"]).strip(), backend="git")
 
 
 def git_fetch(path: str = ".", remote: str = "origin", prune: bool = False) -> dict[str, object]:
