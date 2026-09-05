@@ -257,7 +257,9 @@ def jj_pull(path: str = ".", remote: str = "origin", branch: str = "", rebase: b
     res = run_jj(args, path)
     if "error" in res:
         return res
-    run_jj(["git", "import"], path)
+    import_res = run_jj(["git", "import"], path)
+    if "error" in import_res:
+        return import_res
     return res
 
 
