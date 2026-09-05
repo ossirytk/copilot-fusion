@@ -273,8 +273,8 @@ def jj_push(
 ) -> dict[str, object]:
     """Push to remote via Jujutsu."""
     args = ["git", "push", "--remote", remote]
+    if tags:
+        return err_payload("jj backend does not support pushing Git tags; omit tags=True or use the git backend.")
     if branch:
         args.extend(["--bookmark", branch])
-    if tags:
-        args.append("--all")
     return run_jj(args, path)
