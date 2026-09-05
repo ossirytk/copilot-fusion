@@ -18,7 +18,7 @@ Enable `contextwell-git` tools to seamlessly operate in Jujutsu-colocated reposi
 1. **LLM Familiarity vs VCS Innovation**: Copilot and LLM agents are trained extensively on standard Git workflows and commands. Jujutsu provides superior VCS semantics (anonymous branching, working-copy commits, operation logs, first-class conflicts), but LLMs rarely invoke `jj` correctly on their own.
 2. **Safe Rollback & Agent Recovery**: Agents frequently make wrong turns. Jujutsu's operation log (`jj undo` / `jj op log`) enables foolproof state recovery compared to destructive `git reset --hard`.
 3. **Non-blocking Conflicts**: Conflicts in `jj` do not leave working directories in broken conflict marker states that fail builds or confuse agents.
-4. **Zero Workflow Friction**: Repositories colocated with `jj git init --colocated` can be managed by agents using standard Git tool calls while developers enjoy native JJ benefits.
+4. **Zero Workflow Friction**: Repositories colocated with `jj git init --colocate` can be managed by agents using standard Git tool calls while developers enjoy native JJ benefits.
 
 ---
 
