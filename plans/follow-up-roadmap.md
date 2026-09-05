@@ -1,12 +1,19 @@
 # Follow-up roadmap
 
-The merged baseline now covers the first pass of the original roadmap:
+The merged baseline now covers the initial implementation passes of the roadmap:
 
 - text distillation: compaction, summarization, remote summarization, and `read_file` compact mode
 - safe editing: guarded patches, richer operations, conflict diagnostics, and workspace policy controls
 - code navigation: symbol lookup, references, callsites, and lightweight callgraph extraction
+- unified VCS: Jujutsu (jj) colocation support, workspace detection, and semantic Git-to-JJ translation
 
 ## Remaining themes
+
+### Jujutsu & VCS enhancements
+
+- Expand `jj` conflict diagnostic details and interactive resolution helpers.
+- Add operation log inspection and agent recovery commands (`jj op log`, `jj undo`).
+- Support remote tracking bookmarks and multi-remote push/fetch options.
 
 ### Text distillation
 

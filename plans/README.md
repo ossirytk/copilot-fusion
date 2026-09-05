@@ -8,6 +8,7 @@ This directory holds the follow-up implementation plans for missing Copilot-assi
 - `text-distillation.md` — deterministic text compaction and optional summarization
 - `safe-editing.md` — patch-based file editing with guardrails
 - `code-navigation.md` — symbol-aware navigation and lookup
+- `jujutsu-git-colocation.md` — Jujutsu (jj) and Git colocation support under unified VCS tools
 
 ## Handoff guidance
 

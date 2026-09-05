@@ -28,3 +28,18 @@ dev = [
 [tool.ruff]
 target-version = "py312"
 line-length = 120
+
+[tool.ruff.lint]
+select = [
+    "E",
+    "F",
+    "W",
+    "I",
+    "B",
+    "C90",
+]
+ignore = ["E501"]
+
+[tool.ruff.lint.mccabe]
+# Set the maximum allowed complexity (default is 10)
+max-complexity = 15
