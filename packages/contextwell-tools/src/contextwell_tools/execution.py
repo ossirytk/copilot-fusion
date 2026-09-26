@@ -317,7 +317,10 @@ class TerminalExecutor:
             return {"error": f"unknown process_id: {process_id}"}
         if record.process.returncode is not None and record.readers is not None:
             try:
-                await asyncio.wait_for(asyncio.gather(*record.readers), timeout=_STATUS_DRAIN_TIMEOUT_SECONDS)
+                await asyncio.wait_for(
+                    asyncio.shield(asyncio.gather(*record.readers)),
+                    timeout=_STATUS_DRAIN_TIMEOUT_SECONDS,
+                )
             except TimeoutError:
                 pass
         return {
