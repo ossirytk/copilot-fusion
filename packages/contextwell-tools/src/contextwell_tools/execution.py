@@ -7,6 +7,7 @@ import json
 import math
 import os
 import signal
+import subprocess
 import uuid
 from dataclasses import dataclass, field
 from pathlib import Path
@@ -181,9 +182,7 @@ class TerminalExecutor:
             lowered = flag.lower()
             if lowered in {"d", "f"}:
                 return True
-            if lowered == "o":
-                return False
-            if lowered in {"n", "q", "u", "v"}:
+            if lowered in {"n", "o", "q", "u", "v"}:
                 continue
             return False
         return False
@@ -219,12 +218,17 @@ class TerminalExecutor:
             if len(self.processes) >= _MAX_PROCESSES:
                 return "too many active processes; stop a process and retry"
             try:
+                process_kwargs: dict[str, object] = {}
+                if os.name == "posix":
+                    process_kwargs["start_new_session"] = True
+                elif hasattr(subprocess, "CREATE_NEW_PROCESS_GROUP"):
+                    process_kwargs["creationflags"] = subprocess.CREATE_NEW_PROCESS_GROUP
                 process = await asyncio.create_subprocess_exec(
                     *command,
                     cwd=working_directory,
                     stdout=asyncio.subprocess.PIPE,
                     stderr=asyncio.subprocess.PIPE,
-                    start_new_session=(os.name == "posix"),
+                    **process_kwargs,
                 )
             except OSError as exc:
                 return f"unable to start command: {exc}"
@@ -249,7 +253,10 @@ class TerminalExecutor:
                 except ProcessLookupError:
                     pass
             else:
-                process.terminate()
+                if hasattr(signal, "CTRL_BREAK_EVENT"):
+                    process.send_signal(signal.CTRL_BREAK_EVENT)
+                else:
+                    process.terminate()
         readers = record.readers or ()
         waiters = asyncio.gather(process.wait(), *readers)
         try:

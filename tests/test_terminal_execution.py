@@ -115,7 +115,7 @@ def test_terminal_exec_blocks_destructive_command(tmp_path: Path, monkeypatch: M
                 ["git", "branch", "-D", "topic"],
                 ["git", "push", "-d", "origin", "topic"],
                 ["git", "push", "-df", "origin", "topic"],
-                ["git", "push", "-uof", "origin", "topic"],
+                ["git", "push", "-uon", "origin", "topic"],
                 ["git", "stash", "drop", "stash@{0}"],
             ],
         )
@@ -149,7 +149,7 @@ def test_terminal_exec_blocks_destructive_command(tmp_path: Path, monkeypatch: M
         non_destructive_short_flags = await _call(
             server,
             "terminal_exec",
-            {"command": ["git", "push", "-uof", "origin", "topic"], "confirm_unsafe": True},
+            {"command": ["git", "push", "-uon", "origin", "topic"], "confirm_unsafe": True},
         )
         assert "blocked" not in str(non_destructive_short_flags.get("error", ""))
 
