@@ -70,8 +70,12 @@ _CONFIRMATION_GIT_SUBCOMMANDS = {
     "pull",
     "push",
     "rebase",
+    "reset",
+    "restore",
     "revert",
+    "switch",
     "tag",
+    "checkout",
 }
 
 
@@ -152,7 +156,7 @@ class TerminalExecutor:
         if executable == "git" and len(command) > 1:
             subcommand = command[1].lower()
             args = {arg.lower() for arg in command[2:]}
-            if subcommand in {"checkout", "reset", "restore", "switch"}:
+            if subcommand == "reset" and args & {"--hard", "--merge", "--keep"}:
                 return "destructive git command is blocked"
             if subcommand == "clean" and any(arg.startswith("-") and "f" in arg[1:] for arg in args):
                 return "destructive git command is blocked"

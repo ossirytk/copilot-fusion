@@ -159,6 +159,22 @@ def test_terminal_exec_requires_confirmation_for_unsafe_allowlisted_command(
     asyncio.run(run())
 
 
+def test_terminal_exec_requires_confirmation_for_git_switch(tmp_path: Path, monkeypatch: MonkeyPatch) -> None:
+    async def run() -> None:
+        server = _server(tmp_path, monkeypatch, [["git", "switch", "topic"]])
+        denied = await _call(server, "terminal_exec", {"command": ["git", "switch", "topic"]})
+        assert "confirm_unsafe=true" in str(denied["error"])
+
+        allowed = await _call(
+            server,
+            "terminal_exec",
+            {"command": ["git", "switch", "topic"], "confirm_unsafe": True},
+        )
+        assert "error" not in allowed
+
+    asyncio.run(run())
+
+
 def test_terminal_status_does_not_hang_when_readers_never_finish(tmp_path: Path) -> None:
     async def run() -> None:
         executor = TerminalExecutor(tmp_path, {("true",)})

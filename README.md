@@ -111,9 +111,11 @@ tools for longer-running commands. Known destructive or privileged commands
 are blocked. Allowlisted shells/interpreters (`sh`, `bash`, `python`, `node`,
 etc.) and mutating git operations (`commit`, `push`, `merge`, `rebase`, etc.)
 require an explicit `confirm_unsafe=true` argument on `terminal_exec` or
-`terminal_start`. This is an allowlist and workspace guard, not an
-operating-system sandbox; approved commands retain the server user's normal
-permissions.
+`terminal_start`. Some destructive git forms remain blocked even with
+confirmation (for example `git clean -f*`, `git reset --hard`,
+`git branch -d/-D`, and force/delete `git push` flags). This is an allowlist
+and workspace guard, not an operating-system sandbox; approved commands retain
+the server user's normal permissions.
 
 Example:
 
