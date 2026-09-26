@@ -110,7 +110,12 @@ def test_terminal_exec_blocks_destructive_command(tmp_path: Path, monkeypatch: M
         server = _server(
             tmp_path,
             monkeypatch,
-            [["rm", "-rf", "target"], ["git", "branch", "-D", "topic"], ["git", "push", "-d", "origin", "topic"]],
+            [
+                ["rm", "-rf", "target"],
+                ["git", "branch", "-D", "topic"],
+                ["git", "push", "-d", "origin", "topic"],
+                ["git", "push", "-df", "origin", "topic"],
+            ],
         )
         blocked_rm = await _call(server, "terminal_exec", {"command": ["rm", "-rf", "target"]})
         assert "blocked" in str(blocked_rm["error"])
@@ -124,6 +129,13 @@ def test_terminal_exec_blocks_destructive_command(tmp_path: Path, monkeypatch: M
             {"command": ["git", "push", "-d", "origin", "topic"], "confirm_unsafe": True},
         )
         assert "blocked" in str(blocked_push_delete["error"])
+
+        blocked_push_delete_force = await _call(
+            server,
+            "terminal_exec",
+            {"command": ["git", "push", "-df", "origin", "topic"], "confirm_unsafe": True},
+        )
+        assert "blocked" in str(blocked_push_delete_force["error"])
 
     asyncio.run(run())
 

@@ -161,7 +161,13 @@ class TerminalExecutor:
             if subcommand == "branch" and args & {"-d", "-D"}:
                 return "branch deletion is blocked"
             if subcommand == "push" and any(
-                arg.lower() in {"--force", "-f", "--delete", "-d"} or arg.lower().startswith("--force-")
+                arg.lower() in {"--force", "--delete"}
+                or arg.lower().startswith("--force-")
+                or (
+                    arg.startswith("-")
+                    and not arg.startswith("--")
+                    and any(short_flag in arg[1:].lower() for short_flag in {"d", "f"})
+                )
                 for arg in command[2:]
             ):
                 return "destructive push is blocked"
