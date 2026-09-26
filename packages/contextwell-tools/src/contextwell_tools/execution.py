@@ -158,10 +158,10 @@ class TerminalExecutor:
                 return "destructive git command is blocked"
             if subcommand == "stash" and args & {"drop", "clear"}:
                 return "destructive git command is blocked"
-            if subcommand == "branch" and "-d" in args:
+            if subcommand == "branch" and args & {"-d", "-D"}:
                 return "branch deletion is blocked"
             if subcommand == "push" and any(
-                arg.lower() in {"--force", "-f", "--delete"} or arg.lower().startswith("--force-")
+                arg.lower() in {"--force", "-f", "--delete", "-d"} or arg.lower().startswith("--force-")
                 for arg in command[2:]
             ):
                 return "destructive push is blocked"

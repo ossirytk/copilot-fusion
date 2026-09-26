@@ -65,6 +65,16 @@ def test_env_config_is_respected(monkeypatch: MonkeyPatch) -> None:
     assert "git_status" not in names
 
 
+def test_invalid_terminal_env_does_not_break_server_startup(monkeypatch: MonkeyPatch) -> None:
+    monkeypatch.setenv("FUSION_EXEC_ALLOWLIST", "{not-json")
+    names = _tool_names()
+    assert "fs_glob" in names
+    assert "terminal_exec" not in names
+    assert "terminal_start" not in names
+    assert "terminal_status" not in names
+    assert "terminal_stop" not in names
+
+
 def _read_compat_matrix() -> dict[str, object]:
     async def _read() -> dict[str, object]:
         server = create_server()

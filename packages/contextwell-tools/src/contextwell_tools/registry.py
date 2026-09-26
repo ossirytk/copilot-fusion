@@ -1443,4 +1443,7 @@ def register(mcp: FastMCP) -> None:
     mcp.tool(file_hash)
     mcp.tool(server_stats)
     mcp.tool(name="fusion_tools_health")(fusion_tools_health)
-    register_execution(mcp)
+    try:
+        register_execution(mcp)
+    except ValueError:
+        pass
