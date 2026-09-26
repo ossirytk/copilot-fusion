@@ -18,6 +18,7 @@ _MAX_OUTPUT_LIMIT = 20_000
 _MAX_TIMEOUT_SECONDS = 300.0
 _MAX_PROCESSES = 100
 _RECORD_OUTPUT_BYTES = _MAX_OUTPUT_LIMIT
+_STATUS_DRAIN_TIMEOUT_SECONDS = 0.25
 _BLOCKED_EXECUTABLES = {
     "dd",
     "fdisk",
@@ -41,6 +42,36 @@ _BLOCKED_EXECUTABLES = {
     "truncate",
     "umount",
     "unlink",
+}
+_CONFIRMATION_EXECUTABLES = {
+    "bash",
+    "cmd",
+    "git",
+    "node",
+    "perl",
+    "powershell",
+    "pwsh",
+    "python",
+    "python3",
+    "ruby",
+    "sh",
+    "zsh",
+}
+_CONFIRMATION_GIT_SUBCOMMANDS = {
+    "add",
+    "am",
+    "apply",
+    "bisect",
+    "cherry-pick",
+    "clone",
+    "commit",
+    "fetch",
+    "merge",
+    "pull",
+    "push",
+    "rebase",
+    "revert",
+    "tag",
 }
 
 
@@ -92,7 +123,17 @@ class TerminalExecutor:
             allowlist.add(tuple(entry))
         return cls(workspace, allowlist)
 
-    def _validate_command(self, command: list[str]) -> str | None:
+    def _requires_confirmation(self, command: list[str]) -> bool:
+        executable = Path(command[0]).name.lower()
+        if executable in _CONFIRMATION_EXECUTABLES:
+            if executable != "git":
+                return True
+            if len(command) == 1:
+                return True
+            return command[1].lower() in _CONFIRMATION_GIT_SUBCOMMANDS
+        return False
+
+    def _validate_command(self, command: list[str], confirm_unsafe: bool) -> str | None:
         if (
             not command
             or not isinstance(command[0], str)
@@ -102,6 +143,8 @@ class TerminalExecutor:
             return "command must be an argv array with a non-empty executable"
         if tuple(command) not in self.allowlist:
             return "command is not in FUSION_EXEC_ALLOWLIST"
+        if self._requires_confirmation(command) and not confirm_unsafe:
+            return "potentially unsafe command requires confirm_unsafe=true"
 
         executable = Path(command[0]).name.lower()
         if executable in _BLOCKED_EXECUTABLES:
@@ -213,9 +256,14 @@ class TerminalExecutor:
         }
 
     async def execute(
-        self, command: list[str], working_directory: str | None, timeout_seconds: float, max_output_chars: int
+        self,
+        command: list[str],
+        working_directory: str | None,
+        timeout_seconds: float,
+        max_output_chars: int,
+        confirm_unsafe: bool,
     ) -> dict[str, object]:
-        error = self._validate_command(command)
+        error = self._validate_command(command, confirm_unsafe)
         if error:
             return {"error": error}
         if not math.isfinite(timeout_seconds) or not 0 < timeout_seconds <= _MAX_TIMEOUT_SECONDS:
@@ -241,9 +289,13 @@ class TerminalExecutor:
         return {**self._output(record, max_output_chars), "timed_out": timed_out}
 
     async def start(
-        self, command: list[str], working_directory: str | None, max_output_chars: int
+        self,
+        command: list[str],
+        working_directory: str | None,
+        max_output_chars: int,
+        confirm_unsafe: bool,
     ) -> dict[str, object]:
-        error = self._validate_command(command)
+        error = self._validate_command(command, confirm_unsafe)
         if error:
             return {"error": error}
         if not 1 <= max_output_chars <= _MAX_OUTPUT_LIMIT:
@@ -264,7 +316,10 @@ class TerminalExecutor:
         if record is None:
             return {"error": f"unknown process_id: {process_id}"}
         if record.process.returncode is not None and record.readers is not None:
-            await asyncio.gather(*record.readers)
+            try:
+                await asyncio.wait_for(asyncio.gather(*record.readers), timeout=_STATUS_DRAIN_TIMEOUT_SECONDS)
+            except TimeoutError:
+                pass
         return {
             **self._output(record, max_output_chars),
             "state": "running" if record.process.returncode is None else "exited",
@@ -292,20 +347,22 @@ def register_execution(mcp: FastMCP) -> None:
         working_directory: str | None = None,
         timeout_seconds: float = 30.0,
         max_output_chars: int = _DEFAULT_OUTPUT_LIMIT,
+        confirm_unsafe: bool = False,
     ) -> dict[str, object]:
         """Run one allowlisted command and return its bounded output and exit code."""
 
-        return await executor.execute(command, working_directory, timeout_seconds, max_output_chars)
+        return await executor.execute(command, working_directory, timeout_seconds, max_output_chars, confirm_unsafe)
 
     @mcp.tool(name="terminal_start")
     async def terminal_start(
         command: list[str],
         working_directory: str | None = None,
         max_output_chars: int = _DEFAULT_OUTPUT_LIMIT,
+        confirm_unsafe: bool = False,
     ) -> dict[str, object]:
         """Start an allowlisted command that may continue running."""
 
-        return await executor.start(command, working_directory, max_output_chars)
+        return await executor.start(command, working_directory, max_output_chars, confirm_unsafe)
 
     @mcp.tool(name="terminal_status")
     async def terminal_status(process_id: str, max_output_chars: int = _DEFAULT_OUTPUT_LIMIT) -> dict[str, object]:

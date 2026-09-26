@@ -1,7 +1,9 @@
 import asyncio
 import json
 from pathlib import Path
+from types import SimpleNamespace
 
+from contextwell_tools.execution import TerminalExecutor, _ProcessRecord
 from copilot_fusion.server import create_server
 from pytest import MonkeyPatch
 
@@ -108,5 +110,46 @@ def test_terminal_exec_blocks_destructive_command(tmp_path: Path, monkeypatch: M
         server = _server(tmp_path, monkeypatch, [["rm", "-rf", "target"]])
         result = await _call(server, "terminal_exec", {"command": ["rm", "-rf", "target"]})
         assert "blocked" in str(result["error"])
+
+    asyncio.run(run())
+
+
+def test_terminal_exec_requires_confirmation_for_unsafe_allowlisted_command(
+    tmp_path: Path, monkeypatch: MonkeyPatch
+) -> None:
+    async def run() -> None:
+        server = _server(tmp_path, monkeypatch, [["python", "-c", "print('ok')"]])
+        denied = await _call(server, "terminal_exec", {"command": ["python", "-c", "print('ok')"]})
+        assert "confirm_unsafe=true" in str(denied["error"])
+
+        allowed = await _call(
+            server,
+            "terminal_exec",
+            {"command": ["python", "-c", "print('ok')"], "confirm_unsafe": True},
+        )
+        assert allowed["exit_code"] == 0
+        assert allowed["stdout"].strip() == "ok"
+
+    asyncio.run(run())
+
+
+def test_terminal_status_does_not_hang_when_readers_never_finish(tmp_path: Path) -> None:
+    async def run() -> None:
+        executor = TerminalExecutor(tmp_path, {("true",)})
+        reader_one = asyncio.create_task(asyncio.sleep(60))
+        reader_two = asyncio.create_task(asyncio.sleep(60))
+        executor.processes["p"] = _ProcessRecord(
+            process_id="p",
+            process=SimpleNamespace(returncode=0),
+            readers=(reader_one, reader_two),
+        )
+        try:
+            result = await asyncio.wait_for(executor.status("p", max_output_chars=100), timeout=1.0)
+        finally:
+            reader_one.cancel()
+            reader_two.cancel()
+            await asyncio.gather(reader_one, reader_two, return_exceptions=True)
+        assert result["state"] == "exited"
+        assert result["exit_code"] == 0
 
     asyncio.run(run())
