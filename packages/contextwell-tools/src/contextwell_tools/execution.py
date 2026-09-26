@@ -93,7 +93,7 @@ class TerminalExecutor:
     """Run explicitly approved commands within a configured workspace."""
 
     def __init__(self, workspace: Path, allowlist: set[tuple[str, ...]]) -> None:
-        self.workspace = workspace
+        self.workspace = workspace.resolve()
         self.allowlist = allowlist
         self.processes: dict[str, _ProcessRecord] = {}
         self._start_lock = asyncio.Lock()
