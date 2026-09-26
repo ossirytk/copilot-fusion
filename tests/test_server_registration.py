@@ -73,6 +73,12 @@ def test_invalid_terminal_env_does_not_break_server_startup(monkeypatch: MonkeyP
     assert "terminal_start" not in names
     assert "terminal_status" not in names
     assert "terminal_stop" not in names
+    matrix = _read_compat_matrix()
+    preferred = matrix["preferred_surface"]
+    assert "terminal_exec" not in preferred
+    assert "terminal_start" not in preferred
+    assert "terminal_status" not in preferred
+    assert "terminal_stop" not in preferred
 
 
 def _read_compat_matrix() -> dict[str, object]:
