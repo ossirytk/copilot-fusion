@@ -326,6 +326,7 @@ def remember_batch(memories: list[dict], allow_duplicate: bool = False) -> dict[
                 tags=item.get("tags"),
                 source=str(item.get("source", "")),
                 allow_duplicate=allow_duplicate,
+                scope_path=str(item.get("scope_path", "")),
             )
         )
     return {"stored": len(stored), "items": stored}
