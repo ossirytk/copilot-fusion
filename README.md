@@ -88,6 +88,29 @@ Domain registration can be controlled with environment variables:
 - `FUSION_ENABLE_TOOLS` (`1`/`0`, default `1`)
 - `FUSION_ENABLE_DIFF` (`1`/`0`, default `1`)
 
+Terminal execution is available through `terminal_exec`, `terminal_start`,
+`terminal_status`, and `terminal_stop`. It is disabled by default until an
+administrator configures `FUSION_EXEC_ALLOWLIST` as a JSON array of exact
+argument arrays. The working directory defaults to the server's startup
+directory and can be narrowed or changed with `FUSION_EXEC_WORKSPACE`.
+
+For example, this configuration approves only `git status --short` and `pytest
+-q`; callers cannot add or change command arguments:
+
+```bash
+FUSION_EXEC_WORKSPACE=/path/to/repo \
+FUSION_EXEC_ALLOWLIST='[["git","status","--short"],["pytest","-q"]]' \
+copilot-fusion
+```
+
+Commands are launched without an implicit shell, must use a working directory
+inside the configured workspace, and return bounded output (8,000 characters
+per stream by default, configurable up to 20,000). `terminal_exec` defaults to
+a 30-second timeout, configurable up to 300 seconds; use the start/status/stop
+tools for longer-running commands. Known destructive or privileged commands
+are blocked. This is an allowlist and workspace guard, not an operating-system
+sandbox; approved commands retain the server user's normal permissions.
+
 Example:
 
 ```bash
@@ -177,4 +200,4 @@ hyperfine --warmup 2 "uv run python scripts/benchmark_fusion.py"
 | `list_tools_ms` | 1.043 |
 | `fusion_health_ms` | 0.677 |
 | `fusion_api_compat_ms` | 0.579 |
-| `tool_count` | 55 |
+| `tool_count` | 59 |

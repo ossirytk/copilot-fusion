@@ -16,6 +16,8 @@ from urllib.request import Request, urlopen
 from copilot_fusion_shared import resolve_path
 from fastmcp import FastMCP
 
+from contextwell_tools.execution import register_execution
+
 try:
     import tomllib
 except ModuleNotFoundError:  # pragma: no cover
@@ -1441,3 +1443,4 @@ def register(mcp: FastMCP) -> None:
     mcp.tool(file_hash)
     mcp.tool(server_stats)
     mcp.tool(name="fusion_tools_health")(fusion_tools_health)
+    register_execution(mcp)

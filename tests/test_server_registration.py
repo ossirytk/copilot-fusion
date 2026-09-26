@@ -24,6 +24,10 @@ def test_unified_server_exposes_core_git_and_tools() -> None:
     assert "remember" in names
     assert "git_status" in names
     assert "fs_glob" in names
+    assert "terminal_exec" in names
+    assert "terminal_start" in names
+    assert "terminal_status" in names
+    assert "terminal_stop" in names
     assert "fusion_health" in names
     assert "fusion_api_compat" in names
 
@@ -36,6 +40,10 @@ def test_config_toggles_disable_domains() -> None:
 
     names = asyncio.run(_read())
     assert "fs_glob" in names
+    assert "terminal_exec" in names
+    assert "terminal_start" in names
+    assert "terminal_status" in names
+    assert "terminal_stop" in names
     assert "remember" not in names
     assert "git_status" not in names
 
@@ -52,6 +60,7 @@ def test_env_config_is_respected(monkeypatch: MonkeyPatch) -> None:
 
     names = asyncio.run(_read())
     assert "fs_glob" in names
+    assert "terminal_exec" in names
     assert "remember" not in names
     assert "git_status" not in names
 
@@ -78,7 +87,18 @@ def test_api_compat_matrix_preferred_surface() -> None:
     preferred = matrix["preferred_surface"]
     assert isinstance(preferred, list)
     # Core preferred tools are present.
-    for tool in ("remember", "recall", "git_status", "fs_glob", "read_file", "diff_staged"):
+    for tool in (
+        "remember",
+        "recall",
+        "git_status",
+        "fs_glob",
+        "read_file",
+        "diff_staged",
+        "terminal_exec",
+        "terminal_start",
+        "terminal_status",
+        "terminal_stop",
+    ):
         assert tool in preferred, f"expected {tool!r} in preferred_surface"
 
 

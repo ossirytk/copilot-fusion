@@ -115,6 +115,11 @@ PREFERRED_SURFACE: set[str] = {
     # server
     "fusion_health",
     "fusion_api_compat",
+    # terminal execution (opt-in via FUSION_EXEC_ALLOWLIST)
+    "terminal_exec",
+    "terminal_start",
+    "terminal_status",
+    "terminal_stop",
 }
 
 # ---------------------------------------------------------------------------
@@ -158,6 +163,7 @@ def active_tool_names(config: FusionConfig) -> set[str]:
         names.add("fusion_git_health")
     if config.enable_tools:
         names.update(TOOLPILOT_TOOLS)
+        names.update({"terminal_exec", "terminal_start", "terminal_status", "terminal_stop"})
         names.add("fusion_tools_health")
         # git_log is NOT in TOOLPILOT_TOOLS; it is exclusively registered by the
         # git domain (GITPILOT_TOOLS) to avoid duplicate registration.
