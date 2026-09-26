@@ -108,8 +108,12 @@ inside the configured workspace, and return bounded output (8,000 characters
 per stream by default, configurable up to 20,000). `terminal_exec` defaults to
 a 30-second timeout, configurable up to 300 seconds; use the start/status/stop
 tools for longer-running commands. Known destructive or privileged commands
-are blocked. This is an allowlist and workspace guard, not an operating-system
-sandbox; approved commands retain the server user's normal permissions.
+are blocked. Allowlisted shells/interpreters (`sh`, `bash`, `python`, `node`,
+etc.) and mutating git operations (`commit`, `push`, `merge`, `rebase`, etc.)
+require an explicit `confirm_unsafe=true` argument on `terminal_exec` or
+`terminal_start`. This is an allowlist and workspace guard, not an
+operating-system sandbox; approved commands retain the server user's normal
+permissions.
 
 Example:
 

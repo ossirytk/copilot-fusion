@@ -315,6 +315,7 @@ class TerminalExecutor:
         record = self.processes.get(process_id)
         if record is None:
             return {"error": f"unknown process_id: {process_id}"}
+        readers_running = False
         if record.process.returncode is not None and record.readers is not None:
             try:
                 await asyncio.wait_for(
@@ -322,10 +323,13 @@ class TerminalExecutor:
                     timeout=_STATUS_DRAIN_TIMEOUT_SECONDS,
                 )
             except TimeoutError:
-                pass
+                readers_running = any(not reader.done() for reader in record.readers)
+            else:
+                readers_running = any(not reader.done() for reader in record.readers)
+        state = "running" if record.process.returncode is None else ("draining" if readers_running else "exited")
         return {
             **self._output(record, max_output_chars),
-            "state": "running" if record.process.returncode is None else "exited",
+            "state": state,
         }
 
     async def stop(self, process_id: str, max_output_chars: int) -> dict[str, object]:

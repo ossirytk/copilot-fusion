@@ -149,7 +149,7 @@ def test_terminal_status_does_not_hang_when_readers_never_finish(tmp_path: Path)
             reader_one.cancel()
             reader_two.cancel()
             await asyncio.gather(reader_one, reader_two, return_exceptions=True)
-        assert result["state"] == "exited"
+        assert result["state"] == "draining"
         assert result["exit_code"] == 0
 
     asyncio.run(run())
