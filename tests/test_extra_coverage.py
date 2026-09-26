@@ -225,11 +225,30 @@ def test_remember_batch() -> None:
     items = [
         {"content": "batch-item-1", "type": "fact", "scope": "global"},
         {"content": "batch-item-2", "type": "code", "scope": "global"},
+        {"content": "batch-item-scoped-1", "scope": "project", "scope_path": "C:/workspace/one"},
+        {"content": "batch-item-scoped-2", "scope": "project", "scope_path": "D:/workspace/two"},
     ]
     result = _call("remember_batch", {"memories": items})
     assert isinstance(result, dict)
-    assert result.get("stored") == 2
-    for mem in result.get("items", []):
+    assert result.get("stored") == 4
+    memories = result.get("items", [])
+    assert isinstance(memories, list)
+    assert memories[0].get("scope_path", "") == ""
+    assert memories[1].get("scope_path", "") == ""
+
+    for content, scope_path in (
+        ("batch-item-scoped-1", "C:/workspace/one"),
+        ("batch-item-scoped-2", "D:/workspace/two"),
+    ):
+        recalled = _call("recall", {"query": content, "scope": "project", "scope_path": scope_path})
+        assert isinstance(recalled, list)
+        assert any(
+            item.get("content") == content and item.get("scope_path") == scope_path
+            for item in recalled
+            if isinstance(item, dict)
+        )
+
+    for mem in memories:
         assert isinstance(mem, dict)
         assert "id" in mem
         _call("forget", {"memory_id": mem["id"]})
