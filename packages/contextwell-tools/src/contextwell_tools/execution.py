@@ -24,8 +24,6 @@ _BLOCKED_EXECUTABLES = {
     "fdisk",
     "format",
     "halt",
-    "chmod",
-    "chown",
     "kill",
     "killall",
     "mkfs",
@@ -45,6 +43,8 @@ _BLOCKED_EXECUTABLES = {
 }
 _CONFIRMATION_EXECUTABLES = {
     "bash",
+    "chmod",
+    "chown",
     "cmd",
     "git",
     "node",
@@ -63,9 +63,7 @@ _CONFIRMATION_GIT_SUBCOMMANDS = {
     "apply",
     "bisect",
     "cherry-pick",
-    "clone",
     "commit",
-    "fetch",
     "merge",
     "pull",
     "push",
@@ -167,15 +165,28 @@ class TerminalExecutor:
             if subcommand == "push" and any(
                 arg.lower() in {"--force", "--delete"}
                 or arg.lower().startswith("--force-")
-                or (
-                    arg.startswith("-")
-                    and not arg.startswith("--")
-                    and any(short_flag in arg[1:].lower() for short_flag in {"d", "f"})
-                )
+                or self._has_destructive_push_short_flag(arg)
                 for arg in command[2:]
             ):
                 return "destructive push is blocked"
         return None
+
+    def _has_destructive_push_short_flag(self, arg: str) -> bool:
+        if not arg.startswith("-") or arg.startswith("--"):
+            return False
+        short_flags = arg[1:]
+        if not short_flags:
+            return False
+        for flag in short_flags:
+            lowered = flag.lower()
+            if lowered in {"d", "f"}:
+                return True
+            if lowered == "o":
+                return False
+            if lowered in {"n", "q", "u", "v"}:
+                continue
+            return False
+        return False
 
     def _resolve_working_directory(self, working_directory: str | None) -> Path | str:
         candidate = Path(working_directory).expanduser() if working_directory else self.workspace

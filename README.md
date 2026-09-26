@@ -109,7 +109,8 @@ per stream by default, configurable up to 20,000). `terminal_exec` defaults to
 a 30-second timeout, configurable up to 300 seconds; use the start/status/stop
 tools for longer-running commands. Known destructive or privileged commands
 are blocked. Allowlisted shells/interpreters (`sh`, `bash`, `python`, `node`,
-etc.) and mutating git operations (`commit`, `push`, `merge`, `rebase`, etc.)
+etc.), permission/ownership changes (`chmod`, `chown`), and mutating git
+operations (`commit`, `push`, `merge`, `rebase`, `reset`, `switch`, etc.)
 require an explicit `confirm_unsafe=true` argument on `terminal_exec` or
 `terminal_start`. Some destructive git forms remain blocked even with
 confirmation (for example `git clean -f*`, `git reset --hard`,

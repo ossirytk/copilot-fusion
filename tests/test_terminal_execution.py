@@ -115,6 +115,7 @@ def test_terminal_exec_blocks_destructive_command(tmp_path: Path, monkeypatch: M
                 ["git", "branch", "-D", "topic"],
                 ["git", "push", "-d", "origin", "topic"],
                 ["git", "push", "-df", "origin", "topic"],
+                ["git", "push", "-uof", "origin", "topic"],
                 ["git", "stash", "drop", "stash@{0}"],
             ],
         )
@@ -144,6 +145,13 @@ def test_terminal_exec_blocks_destructive_command(tmp_path: Path, monkeypatch: M
             {"command": ["git", "stash", "drop", "stash@{0}"], "confirm_unsafe": True},
         )
         assert "blocked" in str(blocked_stash_drop["error"])
+
+        non_destructive_short_flags = await _call(
+            server,
+            "terminal_exec",
+            {"command": ["git", "push", "-uof", "origin", "topic"], "confirm_unsafe": True},
+        )
+        assert "blocked" not in str(non_destructive_short_flags.get("error", ""))
 
     asyncio.run(run())
 
@@ -179,6 +187,24 @@ def test_terminal_exec_requires_confirmation_for_git_switch(tmp_path: Path, monk
             {"command": ["git", "switch", "topic"], "confirm_unsafe": True},
         )
         assert "error" not in allowed
+
+    asyncio.run(run())
+
+
+def test_terminal_exec_requires_confirmation_for_chmod(tmp_path: Path, monkeypatch: MonkeyPatch) -> None:
+    async def run() -> None:
+        target = tmp_path / "sample.txt"
+        target.write_text("x")
+        server = _server(tmp_path, monkeypatch, [["chmod", "644", "sample.txt"]])
+        denied = await _call(server, "terminal_exec", {"command": ["chmod", "644", "sample.txt"]})
+        assert "confirm_unsafe=true" in str(denied["error"])
+
+        allowed = await _call(
+            server,
+            "terminal_exec",
+            {"command": ["chmod", "644", "sample.txt"], "confirm_unsafe": True},
+        )
+        assert allowed["exit_code"] == 0
 
     asyncio.run(run())
 
