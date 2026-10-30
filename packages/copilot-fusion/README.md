@@ -5,6 +5,7 @@ Unified MCP server entry point for copilot-fusion, integrating core memory, VCS 
 ## Overview
 
 - **Entry Point:** Exposes `copilot_fusion.server:create_server()` as the primary FastMCP server.
-- **Composable Domains:** Controlled dynamically via `FusionConfig` and `FUSION_ENABLE_*` environment variables.
-- **Compatibility Matrix:** Runtime verification via `fusion_api_compat` and health checks via `fusion_health`.
+- **Profiles:** `FUSION_PROFILE=core` (memory + `symbol_search`) or `full` (default, adds the portable file/git/diff/terminal tools).
+- **Composable Domains:** Individual domains can be switched off with `FUSION_ENABLE_*`.
+- **Health:** `fusion_health` reports the active profile and domains.
 

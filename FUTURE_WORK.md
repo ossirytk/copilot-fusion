@@ -16,8 +16,7 @@ Embeddings are only worth adding if real misses show up in the eval; add the fai
 by name with no import/type resolution (results flag `same_name_definitions`). Add a language by adding a
 `_Lang` subclass and a grammar dependency; consider LSP only if name-based precision proves insufficient.
 
-## 3. Housekeeping required by SCOPE.md
+## 3. Housekeeping — done
 
-- Add `FUSION_PROFILE` (`core` | `full`) gating the portable profile.
-- Deprecate with a warning, then remove, the tools listed under "Deprecated" in `SCOPE.md`.
-- Keep README and `plans/` in line with the above.
+`FUSION_PROFILE` (`core` | `full`) and removal of the tools listed in `SCOPE.md` are implemented.
+The only open item is confirming CI is green on Windows; after that, this project is in maintenance.

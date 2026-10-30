@@ -300,65 +300,6 @@ def update(
     return {"id": row["id"], "updated_at": now}
 
 
-def remember_file(
-    path: str,
-    scope: MemoryScope = "global",
-    tags: list[str] | None = None,
-    type_hint: MemoryType = "fact",
-    source: str = "",
-    scope_path: str = "",
-    split_headers: bool = True,
-) -> dict[str, object]:
-    resolved = resolve_path(path)
-    text = resolved.read_text(encoding="utf-8")
-    is_markdown = resolved.suffix.lower() in {".md", ".markdown"}
-    if split_headers and is_markdown:
-        import re as _re
-
-        sections = _re.split(r"(?m)^(#{1,6} .+)$", text)
-        chunks: list[str] = []
-        i = 0
-        while i < len(sections):
-            part = sections[i].strip()
-            if _re.match(r"^#{1,6} ", part):
-                header = part
-                body = sections[i + 1].strip() if i + 1 < len(sections) else ""
-                i += 2
-                chunk = f"{header}\n\n{body}".strip() if body else header
-            else:
-                chunk = part
-                i += 1
-            if chunk:
-                chunks.append(chunk)
-        if not chunks:
-            chunks = [text]
-    else:
-        chunks = [text]
-    stored: list[dict[str, object]] = []
-    for chunk in chunks:
-        stored.append(
-            remember(content=chunk, type=type_hint, scope=scope, tags=tags, source=source, scope_path=scope_path)
-        )
-    return {"stored": len(stored), "memories": stored}
-
-
-def remember_batch(memories: list[dict], allow_duplicate: bool = False) -> dict[str, object]:
-    stored: list[dict[str, object]] = []
-    for item in memories:
-        stored.append(
-            remember(
-                content=str(item.get("content", "")),
-                type=item.get("type", "fact"),
-                scope=item.get("scope", "global"),
-                tags=item.get("tags"),
-                source=str(item.get("source", "")),
-                allow_duplicate=allow_duplicate,
-                scope_path=str(item.get("scope_path", "")),
-            )
-        )
-    return {"stored": len(stored), "items": stored}
-
-
 def compress_memories(
     summary: str,
     type: MemoryType | str = "",
@@ -435,10 +376,6 @@ def purge_expired() -> str:
     return f"Purged {result.rowcount} expired memories."
 
 
-def fusion_core_health() -> dict[str, str]:
-    return {"domain": "core", "status": "ready"}
-
-
 def register(mcp: FastMCP) -> None:
     """Register contextwell-core tools into the provided MCP server."""
     mcp.tool(remember)
@@ -446,10 +383,7 @@ def register(mcp: FastMCP) -> None:
     mcp.tool(forget)
     mcp.tool(list_memories)
     mcp.tool(update)
-    mcp.tool(remember_file)
-    mcp.tool(remember_batch)
     mcp.tool(compress_memories)
     mcp.tool(export_memories)
     mcp.tool(memory_stats)
     mcp.tool(purge_expired)
-    mcp.tool(name="fusion_core_health")(fusion_core_health)

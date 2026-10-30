@@ -45,37 +45,19 @@ def test_core_memory_roundtrip() -> None:
         )
 
 
-def test_tools_fs_glob_and_json_select() -> None:
+def test_tools_fs_glob_and_read_file() -> None:
     with tempfile.TemporaryDirectory() as tmp:
         root = Path(tmp)
         (root / "a.txt").write_text("alpha\n", encoding="utf-8")
-        (root / "b.json").write_text(json.dumps([{"name": "alpha"}, {"name": "beta"}]), encoding="utf-8")
 
         globbed = _call("fs_glob", {"base_path": tmp, "patterns": ["*.txt"]})
         assert isinstance(globbed, dict)
         results = globbed.get("results", [])
         assert any(str(path).endswith("a.txt") for path in results)
 
-        selected = _call(
-            "json_select",
-            {
-                "path": str(root / "b.json"),
-                "fields": ["name"],
-                "filters": [{"field": "name", "op": "contains", "value": "alpha"}],
-            },
-        )
-        assert isinstance(selected, dict)
-        rows = selected.get("results", [])
-        assert isinstance(rows, list)
-        assert rows and rows[0]["name"] == "alpha"
-
         read_back = _call("read_file", {"path": str(root / "a.txt")})
         assert isinstance(read_back, dict)
         assert "alpha" in str(read_back.get("content", ""))
-
-        file_digest = _call("file_hash", {"path": str(root / "a.txt"), "algorithm": "sha256"})
-        assert isinstance(file_digest, dict)
-        assert len(str(file_digest.get("hash", ""))) == 64
 
 
 def test_git_status_on_initialized_repo() -> None:
@@ -94,19 +76,6 @@ def test_git_status_on_initialized_repo() -> None:
         assert isinstance(init, dict)
         assert "error" not in init
         assert "status" in init
-
-
-def test_diff_files() -> None:
-    with tempfile.TemporaryDirectory() as tmp:
-        root = Path(tmp)
-        (root / "a.txt").write_text("line1\nline2\nline3\n", encoding="utf-8")
-        (root / "b.txt").write_text("line1\nline2 changed\nline3\nline4\n", encoding="utf-8")
-
-        result = _call("diff_files", {"path_a": str(root / "a.txt"), "path_b": str(root / "b.txt")})
-        assert isinstance(result, dict)
-        assert result.get("total_files", 0) >= 1
-        assert result.get("total_additions", 0) >= 1
-        assert result.get("total_deletions", 0) >= 1
 
 
 def test_diff_staged_empty(tmp_path: Path) -> None:
@@ -155,21 +124,6 @@ def test_compress_memories_dry_run() -> None:
         for m in listed:
             if isinstance(m, dict) and "dry-run-test-memory" in str(m.get("content", "")):
                 _call("forget", {"memory_id": m["id"]})
-
-
-def test_remember_file_markdown_split() -> None:
-    with tempfile.NamedTemporaryFile(mode="w", suffix=".md", delete=False) as f:
-        f.write("# Header One\n\nContent of section one.\n\n# Header Two\n\nContent of section two.\n")
-        tmp_path = f.name
-
-    result = _call("remember_file", {"path": tmp_path, "split_headers": True})
-    assert isinstance(result, dict)
-    assert result.get("stored", 0) == 2
-    memories = result.get("memories", [])
-    assert len(memories) == 2
-    for m in memories:
-        if isinstance(m, dict) and "id" in m:
-            _call("forget", {"memory_id": m["id"]})
 
 
 def test_text_compact_from_text() -> None:
@@ -654,30 +608,6 @@ def test_apply_text_patch_relative_path(tmp_path: Path) -> None:
     assert target.read_text(encoding="utf-8") == "HELLO\nworld\n"
 
 
-def test_apply_text_patch_batch_relative_path(tmp_path: Path) -> None:
-    root = tmp_path / "workspace"
-    root.mkdir()
-    first = root / "a.txt"
-    first.write_text("x\n", encoding="utf-8")
-
-    result = _call(
-        "apply_text_patch_batch",
-        {
-            "workspace_root": str(root),
-            "patches": [
-                {
-                    "path": "a.txt",
-                    "edits": [{"start_line": 1, "end_line": 1, "content": "X"}],
-                }
-            ],
-        },
-    )
-    assert isinstance(result, dict)
-    assert "error" not in result
-    assert result.get("applied") == 1
-    assert first.read_text(encoding="utf-8") == "X\n"
-
-
 def test_symbol_search_invalid_kind_message(tmp_path: Path) -> None:
     target = tmp_path / "module.py"
     target.write_text("def run():\n    pass\n", encoding="utf-8")
@@ -702,38 +632,6 @@ def test_apply_text_patch_workspace_root_required(tmp_path: Path) -> None:
     details = result.get("details", {})
     assert isinstance(details, dict)
     assert details.get("type") == "workspace-root-required"
-
-
-def test_apply_text_patch_batch(tmp_path: Path) -> None:
-    root = tmp_path / "workspace"
-    root.mkdir()
-    first = root / "first.txt"
-    first.write_text("alpha\nbeta\n", encoding="utf-8")
-    second = root / "second.txt"
-    second.write_text("one\ntwo\n", encoding="utf-8")
-
-    result = _call(
-        "apply_text_patch_batch",
-        {
-            "workspace_root": str(root),
-            "patches": [
-                {
-                    "path": str(first),
-                    "edits": [{"start_line": 2, "end_line": 2, "content": "BETA"}],
-                },
-                {
-                    "path": str(second),
-                    "edits": [{"start_line": 1, "end_line": 1, "content": "ONE"}],
-                },
-            ],
-        },
-    )
-    assert isinstance(result, dict)
-    assert "error" not in result
-    assert result.get("applied") == 2
-    assert result.get("changed") == 2
-    assert first.read_text(encoding="utf-8") == "alpha\nBETA\n"
-    assert second.read_text(encoding="utf-8") == "ONE\ntwo\n"
 
 
 def test_symbol_search_python_symbols(tmp_path: Path) -> None:

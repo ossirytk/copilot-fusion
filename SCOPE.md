@@ -12,21 +12,20 @@ they do not provide. This file is the contract for when the project is "done".
    - Retrieval quality is checked by a small eval set in `tests/`.
 2. **Code navigation** (`symbol_search`)
    - Tree-sitter backed definitions, references and callers.
-   - Python and TS/JS required, plus one more language.
+   - Python, TS/JS and Go.
 
-## Portable profile (`FUSION_PROFILE=full`, default off in CLI-only setups)
+## Portable profile (`FUSION_PROFILE=full`, the default; CLI-only users can set `FUSION_PROFILE=core`)
 
 Cross-platform, structured, bounded wrappers for clients without a reliable shell:
 `git_*`, `gh_*`, `diff_staged`/`diff_refs`, `terminal_*` (allowlisted), `read_file`, `text_search`, `fs_glob`,
 and `text_compact`/`text_summarize` (kept for reducing large logs and large files; useful, not critical).
 No new tools are added here; behavior changes only for bugs and safety.
 
-## Deprecated (remove after one release with a warning)
+## Removed
 
-`fs_tree`, `json_select`, `yaml_select`, `file_hash`, `remember_file`, `remember_batch`,
-`apply_text_patch_batch`, `diff_files`, `git_diff`,
-the `fusion_*_health` family, and `fusion_api_compat`
-(migration from contextwell/gitpilot/toolpilot/diffpilot is complete).
+(none pending). Already removed: `fs_tree`, `json_select`, `yaml_select`, `file_hash`, `remember_file`,
+`remember_batch`, `apply_text_patch_batch`, `diff_files`, `fusion_core_health`, `fusion_tools_health`,
+`fusion_diff_health` and `fusion_api_compat`. `git_diff` and `fusion_git_health` stay because they are jj-aware.
 
 ## Explicitly out of scope
 
@@ -37,8 +36,8 @@ and any new tool that duplicates a client-native capability.
 
 - [x] `recall` uses real retrieval (FTS5/bm25) and has an eval test.
 - [x] `symbol_search` uses Tree-sitter for Python, TS/JS and Go.
-- [ ] `FUSION_PROFILE` (`core` | `full`) gates the portable profile.
-- [ ] Deprecated tools are removed; README and `FUTURE_WORK.md` match this file.
+- [x] `FUSION_PROFILE` (`core` | `full`) gates the portable profile.
+- [x] Deprecated tools are removed; README and `FUTURE_WORK.md` match this file.
 - [ ] CI is green on Linux and Windows.
 
 After that: dependency updates, MCP spec compatibility and bug fixes only.

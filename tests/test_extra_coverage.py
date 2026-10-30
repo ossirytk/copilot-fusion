@@ -203,57 +203,6 @@ def test_update_memory_not_found() -> None:
     assert "error" in result
 
 
-def test_remember_file() -> None:
-    """remember_file stores the content of a file as a memory."""
-    with tempfile.NamedTemporaryFile(mode="w", suffix=".txt", delete=False) as f:
-        f.write("file-memory-content")
-        tmp_path = f.name
-
-    result = _call("remember_file", {"path": tmp_path, "scope": "global", "tags": ["file"]})
-    assert isinstance(result, dict)
-    assert result.get("stored") == 1
-    memories = result.get("memories", [])
-    assert isinstance(memories, list)
-    assert len(memories) == 1
-    assert "id" in memories[0]
-
-    _call("forget", {"memory_id": memories[0]["id"]})
-
-
-def test_remember_batch() -> None:
-    """remember_batch stores multiple memories at once."""
-    items = [
-        {"content": "batch-item-1", "type": "fact", "scope": "global"},
-        {"content": "batch-item-2", "type": "code", "scope": "global"},
-        {"content": "batch-item-scoped-1", "scope": "project", "scope_path": "C:/workspace/one"},
-        {"content": "batch-item-scoped-2", "scope": "project", "scope_path": "D:/workspace/two"},
-    ]
-    result = _call("remember_batch", {"memories": items})
-    assert isinstance(result, dict)
-    assert result.get("stored") == 4
-    memories = result.get("items", [])
-    assert isinstance(memories, list)
-    assert memories[0].get("scope_path", "") == ""
-    assert memories[1].get("scope_path", "") == ""
-
-    for content, scope_path in (
-        ("batch-item-scoped-1", "C:/workspace/one"),
-        ("batch-item-scoped-2", "D:/workspace/two"),
-    ):
-        recalled = _call("recall", {"query": content, "scope": "project", "scope_path": scope_path})
-        assert isinstance(recalled, list)
-        assert any(
-            item.get("content") == content and item.get("scope_path") == scope_path
-            for item in recalled
-            if isinstance(item, dict)
-        )
-
-    for mem in memories:
-        assert isinstance(mem, dict)
-        assert "id" in mem
-        _call("forget", {"memory_id": mem["id"]})
-
-
 def test_compress_memories() -> None:
     """compress_memories replaces many memories with a single summary."""
     for i in range(3):
@@ -365,41 +314,6 @@ def test_purge_expired() -> None:
 # ---------------------------------------------------------------------------
 
 
-def test_fs_tree_basic() -> None:
-    """fs_tree returns directory entries within depth/count limits."""
-    with tempfile.TemporaryDirectory() as tmp:
-        root = Path(tmp)
-        (root / "file1.txt").write_text("a")
-        sub = root / "subdir"
-        sub.mkdir()
-        (sub / "file2.txt").write_text("b")
-        (root / ".hidden").write_text("h")
-
-        result = _call("fs_tree", {"path": tmp, "include_hidden": False, "max_depth": 2})
-        assert isinstance(result, dict)
-        paths = [e["path"] for e in result.get("entries", [])]
-        assert any("file1.txt" in p for p in paths)
-        assert not any(".hidden" in p for p in paths)
-
-        # With include_hidden=True the hidden file should appear.
-        result_hidden = _call("fs_tree", {"path": tmp, "include_hidden": True, "max_depth": 2})
-        paths_hidden = [e["path"] for e in result_hidden.get("entries", [])]
-        assert any(".hidden" in p for p in paths_hidden)
-
-
-def test_fs_tree_max_entries_truncation() -> None:
-    """fs_tree reports truncated=True when max_entries is reached."""
-    with tempfile.TemporaryDirectory() as tmp:
-        root = Path(tmp)
-        for i in range(5):
-            (root / f"file{i}.txt").write_text(str(i))
-
-        result = _call("fs_tree", {"path": tmp, "max_entries": 3})
-        assert isinstance(result, dict)
-        assert result.get("truncated") is True
-        assert len(result.get("entries", [])) <= 3
-
-
 def test_text_search_invalid_regex() -> None:
     """text_search returns an error dict for invalid regex patterns."""
     with tempfile.TemporaryDirectory() as tmp:
@@ -433,63 +347,6 @@ def test_text_search_max_results_truncation() -> None:
         assert isinstance(result, dict)
         assert result.get("truncated") is True
         assert len(result.get("results", [])) <= 5
-
-
-def test_json_select_invalid_json() -> None:
-    """json_select returns an error when the file contains invalid JSON."""
-    with tempfile.NamedTemporaryFile(mode="w", suffix=".json", delete=False) as f:
-        f.write("{not valid json}")
-        tmp_path = f.name
-
-    result = _call("json_select", {"path": tmp_path, "fields": ["name"]})
-    assert isinstance(result, dict)
-    assert "error" in result
-
-
-def test_json_select_invalid_filter_schema() -> None:
-    """json_select returns an error when a filter dict is missing required keys."""
-    with tempfile.NamedTemporaryFile(mode="w", suffix=".json", delete=False) as f:
-        f.write(json.dumps([{"name": "alpha"}]))
-        tmp_path = f.name
-
-    result = _call(
-        "json_select",
-        {"path": tmp_path, "fields": ["name"], "filters": [{"field": "name"}]},  # missing op/value
-    )
-    assert isinstance(result, dict)
-    assert "error" in result
-
-
-def test_yaml_select_with_yaml_file() -> None:
-    """yaml_select reads YAML files correctly."""
-    with tempfile.NamedTemporaryFile(mode="w", suffix=".yaml", delete=False) as f:
-        f.write("name: fusion\nversion: 1\n")
-        tmp_path = f.name
-
-    result = _call("yaml_select", {"path": tmp_path, "fields": ["name", "version"]})
-    assert isinstance(result, dict)
-    assert "error" not in result
-    results = result.get("results", {})
-    assert results.get("name") == "fusion"
-    assert results.get("version") == 1
-
-
-def test_yaml_select_invalid_file() -> None:
-    """yaml_select returns an error for unreadable/invalid files."""
-    result = _call("yaml_select", {"path": "/nonexistent/path/file.yaml", "fields": ["key"]})
-    assert isinstance(result, dict)
-    assert "error" in result
-
-
-def test_yaml_select_with_toml_file() -> None:
-    """yaml_select handles TOML files via the .toml branch."""
-    with tempfile.NamedTemporaryFile(mode="w", suffix=".toml", delete=False) as f:
-        f.write('[project]\nname = "fusion"\n')
-        tmp_path = f.name
-
-    result = _call("yaml_select", {"path": tmp_path, "fields": ["project"]})
-    assert isinstance(result, dict)
-    assert "error" not in result
 
 
 def test_read_file_max_bytes() -> None:

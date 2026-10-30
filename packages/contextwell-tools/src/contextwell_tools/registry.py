@@ -6,7 +6,7 @@ import hashlib
 import json
 import os
 import re
-from collections import Counter, deque
+from collections import Counter
 from pathlib import Path
 from statistics import mean
 from typing import Any
@@ -434,33 +434,6 @@ def fs_glob(base_path: str, patterns: list[str], max_results: int = 5000) -> dic
     return {"results": sorted(set(matches)), "truncated": False}
 
 
-def fs_tree(
-    path: str,
-    include_hidden: bool = False,
-    max_depth: int = 3,
-    max_entries: int = 2000,
-) -> dict[str, object]:
-    _REQUESTS["fs_tree"] += 1
-    root = resolve_path(path)
-    entries: list[dict[str, object]] = []
-    queue: deque[tuple[Path, int]] = deque([(root, 0)])
-    while queue and len(entries) < max_entries:
-        current, depth = queue.popleft()
-        if depth > max_depth:
-            continue
-        for child in sorted(current.iterdir(), key=lambda p: p.name):
-            if not include_hidden and child.name.startswith("."):
-                continue
-            rel = str(child.relative_to(root))
-            item = {"path": rel if rel != "." else ".", "type": "dir" if child.is_dir() else "file", "depth": depth}
-            entries.append(item)
-            if len(entries) >= max_entries:
-                break
-            if child.is_dir():
-                queue.append((child, depth + 1))
-    return {"root": str(root), "entries": entries, "truncated": len(entries) >= max_entries}
-
-
 def text_search(
     mode: str,
     paths: list[str],
@@ -767,55 +740,6 @@ def apply_text_patch(
     return result
 
 
-def apply_text_patch_batch(
-    patches: list[dict[str, object]],
-    dry_run: bool = False,
-    workspace_root: str = "",
-) -> dict[str, object]:
-    _REQUESTS["apply_text_patch_batch"] += 1
-    if not patches:
-        return {"error": "patches must contain at least one patch item."}
-
-    results: list[dict[str, object]] = []
-    changed = 0
-    applied = 0
-    failed = 0
-    for index, patch in enumerate(patches, start=1):
-        if not isinstance(patch, dict):
-            failed += 1
-            results.append({"index": index, "error": "Each patch item must be a JSON object."})
-            continue
-        path = str(patch.get("path", "")).strip()
-        edits = patch.get("edits", [])
-        patch_dry_run = bool(patch.get("dry_run", dry_run))
-        patch_workspace_root = workspace_root if workspace_root else str(patch.get("workspace_root", "")).strip()
-        result = apply_text_patch(
-            path=path,
-            edits=edits if isinstance(edits, list) else [],
-            dry_run=patch_dry_run,
-            include_preview=bool(patch.get("include_preview", patch_dry_run)),
-            create=bool(patch.get("create", False)),
-            expected_hash=str(patch.get("expected_hash", "")),
-            workspace_root=patch_workspace_root,
-        )
-        if "error" in result:
-            failed += 1
-        else:
-            applied += 1
-            if result.get("changed"):
-                changed += 1
-        result["index"] = index
-        results.append(result)
-
-    return {
-        "results": results,
-        "applied": applied,
-        "changed": changed,
-        "failed": failed,
-        "dry_run": dry_run,
-    }
-
-
 def symbol_search(
     paths: list[str],
     query: str = "",
@@ -927,109 +851,23 @@ def read_file(
     return result
 
 
-def json_select(
-    path: str,
-    fields: list[str],
-    filters: list[dict[str, object]] | None = None,
-    max_results: int = 5000,
-) -> dict[str, object]:
-    _REQUESTS["json_select"] += 1
-    try:
-        data = json.loads(resolve_path(path).read_text(encoding="utf-8"))
-    except (OSError, json.JSONDecodeError) as exc:
-        return {"error": f"Failed to read/parse JSON: {exc}"}
-    rows = data if isinstance(data, list) else [data]
-    selected: list[dict[str, object]] = []
-    for row in rows:
-        if filters:
-            passed = True
-            for filt in filters:
-                if not isinstance(filt, dict) or not {"field", "op", "value"}.issubset(filt):
-                    return {"error": f"Filter missing required keys (field, op, value): {filt!r}"}
-                value = _project(row, str(filt["field"]))
-                op = str(filt["op"])
-                expected = filt["value"]
-                if op == "eq" and value != expected:
-                    passed = False
-                    break
-                if op == "contains" and str(expected) not in str(value):
-                    passed = False
-                    break
-            if not passed:
-                continue
-        selected.append({field: _project(row, field) for field in fields})
-        if len(selected) >= max_results:
-            return {"results": selected, "truncated": True}
-    return {"results": selected, "truncated": False}
-
-
-def yaml_select(path: str, fields: list[str]) -> dict[str, object]:
-    _REQUESTS["yaml_select"] += 1
-    resolved = resolve_path(path)
-    suffix = resolved.suffix.lower()
-    try:
-        text = resolved.read_text(encoding="utf-8")
-    except (OSError, UnicodeDecodeError) as exc:
-        return {"error": f"Failed to read file: {exc}"}
-    if suffix == ".toml":
-        if tomllib is None:
-            return {"error": "tomllib unavailable in this Python runtime"}
-        try:
-            data = tomllib.loads(text)
-        except ValueError as exc:
-            return {"error": f"Failed to parse TOML: {exc}"}
-    else:
-        if yaml is None:
-            return {"error": "pyyaml not installed"}
-        try:
-            data = yaml.safe_load(text)
-        except yaml.YAMLError as exc:
-            return {"error": f"Failed to parse YAML: {exc}"}
-    return {"results": {field: _project(data, field) for field in fields}}
-
-
-def file_hash(path: str, algorithm: str = "sha256") -> dict[str, object]:
-    _REQUESTS["file_hash"] += 1
-    resolved = resolve_path(path)
-    normalized = algorithm.lower()
-    if normalized not in {"sha256", "sha1", "md5"}:
-        return {"error": f"Unsupported algorithm: {algorithm}"}
-    hasher = hashlib.new(normalized)
-    with resolved.open("rb") as handle:
-        while True:
-            chunk = handle.read(65_536)
-            if not chunk:
-                break
-            hasher.update(chunk)
-    return {"path": str(resolved), "algorithm": normalized, "hash": hasher.hexdigest()}
-
-
 def server_stats() -> dict[str, object]:
     _REQUESTS["server_stats"] += 1
     return {"requests": dict(_REQUESTS)}
 
 
-def fusion_tools_health() -> dict[str, str]:
-    _REQUESTS["fusion_tools_health"] += 1
-    return {"domain": "tools", "status": "ready"}
-
-
-def register(mcp: FastMCP) -> None:
-    """Register contextwell-tools tools into the provided MCP server."""
+def register(mcp: FastMCP, core_only: bool = False) -> None:
+    """Register contextwell-tools tools; ``core_only`` registers just ``symbol_search``."""
+    mcp.tool(symbol_search)
+    if core_only:
+        return
     mcp.tool(fs_glob)
-    mcp.tool(fs_tree)
     mcp.tool(text_search)
     mcp.tool(text_compact)
     mcp.tool(text_summarize)
     mcp.tool(apply_text_patch)
-    mcp.tool(apply_text_patch_batch)
-    mcp.tool(symbol_search)
     mcp.tool(read_file)
-    mcp.tool(json_select)
-    mcp.tool(yaml_select)
-    mcp.tool(file_hash)
     mcp.tool(server_stats)
-    mcp.tool(name="fusion_tools_health")(fusion_tools_health)
     try:
         register_execution(mcp)
     except ValueError:

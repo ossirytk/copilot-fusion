@@ -2,7 +2,6 @@
 
 from __future__ import annotations
 
-import difflib
 import re
 
 from copilot_fusion_shared import resolve_path, run_command
@@ -113,37 +112,6 @@ def register(mcp: FastMCP) -> None:
         return _summarize_files(files)
 
     @mcp.tool
-    def diff_files(path_a: str, path_b: str) -> dict[str, object]:
-        """Structured JSON diff between two arbitrary files on disk."""
-        resolved_a = resolve_path(path_a)
-        resolved_b = resolve_path(path_b)
-        try:
-            lines_a = resolved_a.read_text(encoding="utf-8").splitlines(keepends=True)
-            lines_b = resolved_b.read_text(encoding="utf-8").splitlines(keepends=True)
-        except (OSError, UnicodeDecodeError) as exc:
-            return {"error": str(exc)}
-        unified = list(
-            difflib.unified_diff(
-                lines_a,
-                lines_b,
-                fromfile=f"a/{resolved_a.name}",
-                tofile=f"b/{resolved_b.name}",
-            )
-        )
-        if not unified:
-            return {"files": [], "total_files": 0, "total_additions": 0, "total_deletions": 0, "total_hunks": 0}
-        diff_text = "".join(unified)
-        # unified_diff uses "--- a/..." and "+++ b/..." but _parse_unified_diff looks for "+++ b/"
-        # Ensure the header is in the expected shape.
-        files = _parse_unified_diff(diff_text)
-        if not files:
-            # Fallback: construct a minimal file entry from raw counts.
-            adds = sum(1 for line in unified if line.startswith("+") and not line.startswith("+++"))
-            dels = sum(1 for line in unified if line.startswith("-") and not line.startswith("---"))
-            files = [{"path": resolved_b.name, "additions": adds, "deletions": dels, "hunks": []}]
-        return _summarize_files(files)
-
-    @mcp.tool
     def summarize_diff(diff_text: str) -> dict[str, object]:
         """Parse a raw unified diff string and return aggregate counts plus compact per-file summaries."""
         if not diff_text.strip():
@@ -162,7 +130,3 @@ def register(mcp: FastMCP) -> None:
             "total_hunks": summary["total_hunks"],
             "files": compact_files,
         }
-
-    @mcp.tool(name="fusion_diff_health")
-    def fusion_diff_health() -> dict[str, str]:
-        return {"domain": "diff", "status": "ready"}
