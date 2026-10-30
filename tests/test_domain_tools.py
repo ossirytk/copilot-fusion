@@ -970,3 +970,16 @@ def test_symbol_search_callgraph(tmp_path: Path) -> None:
     regex_graph = regex_target.get("callgraph", {})
     assert isinstance(regex_graph, dict)
     assert any(item.get("symbol") == "helper" for item in regex_graph.get("callees", []) if isinstance(item, dict))
+
+
+def test_apply_text_patch_preserves_line_endings(tmp_path: Path) -> None:
+    crlf = tmp_path / "crlf.txt"
+    lf = tmp_path / "lf.txt"
+    crlf.write_bytes(b"one\r\ntwo\r\n")
+    lf.write_bytes(b"one\ntwo\n")
+    edit = {"op": "replace", "start_line": 2, "end_line": 2, "content": "TWO"}
+    for target in (crlf, lf):
+        result = _call("apply_text_patch", {"path": str(target), "edits": [edit], "workspace_root": str(tmp_path)})
+        assert isinstance(result, dict) and "error" not in result, result
+    assert crlf.read_bytes() == b"one\r\nTWO\r\n"
+    assert lf.read_bytes() == b"one\nTWO\n"

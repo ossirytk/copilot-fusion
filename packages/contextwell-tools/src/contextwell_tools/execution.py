@@ -6,6 +6,7 @@ import asyncio
 import json
 import math
 import os
+import re
 import signal
 import subprocess
 import uuid
@@ -78,6 +79,20 @@ _CONFIRMATION_GIT_SUBCOMMANDS = {
 }
 
 
+_WINDOWS_EXECUTABLE_SUFFIXES = (".exe", ".com", ".bat", ".cmd")
+_VERSIONED_PYTHON_RE = re.compile(r"^python\d+(\.\d+)*$")
+
+
+def _executable_name(executable: str) -> str:
+    """Normalize an executable for policy checks: basename (either separator), lowercase, no .exe-style suffix."""
+    name = re.split(r"[\\/]", executable)[-1].lower()
+    for suffix in _WINDOWS_EXECUTABLE_SUFFIXES:
+        if name.endswith(suffix):
+            name = name[: -len(suffix)]
+            break
+    return "python" if _VERSIONED_PYTHON_RE.match(name) else name
+
+
 @dataclass(slots=True)
 class _ProcessRecord:
     process_id: str
@@ -127,7 +142,7 @@ class TerminalExecutor:
         return cls(workspace, allowlist)
 
     def _requires_confirmation(self, command: list[str]) -> bool:
-        executable = Path(command[0]).name.lower()
+        executable = _executable_name(command[0])
         if executable in _CONFIRMATION_EXECUTABLES:
             if executable != "git":
                 return True
@@ -149,7 +164,7 @@ class TerminalExecutor:
         if self._requires_confirmation(command) and not confirm_unsafe:
             return "potentially unsafe command requires confirm_unsafe=true"
 
-        executable = Path(command[0]).name.lower()
+        executable = _executable_name(command[0])
         if executable in _BLOCKED_EXECUTABLES:
             return f"destructive or privileged executable is blocked: {executable}"
         if executable == "git" and len(command) > 1:

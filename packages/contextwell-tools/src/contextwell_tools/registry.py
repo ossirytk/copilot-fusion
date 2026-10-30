@@ -652,6 +652,15 @@ def _load_target_text(resolved: Path, expected_hash: str) -> tuple[str, str, dic
     return original_text, before_hash, None
 
 
+def _detect_newline(resolved: Path) -> str:
+    """Return the file's line ending (CRLF if it contains any, else LF) so edits don't rewrite endings."""
+    try:
+        with resolved.open("rb") as fh:
+            return "\r\n" if b"\r\n" in fh.read() else "\n"
+    except OSError:
+        return "\n"
+
+
 def apply_text_patch(
     path: str,
     edits: list[dict[str, object]],
@@ -673,6 +682,7 @@ def apply_text_patch(
     original_text, before_hash, hash_err = _load_target_text(resolved, expected_hash)
     if hash_err:
         return hash_err
+    newline = _detect_newline(resolved) if exists else "\n"
 
     lines = original_text.splitlines()
     has_trailing_newline = original_text.endswith("\n")
@@ -705,7 +715,7 @@ def apply_text_patch(
 
     if not dry_run and changed:
         resolved.parent.mkdir(parents=True, exist_ok=True)
-        resolved.write_text(result_text, encoding="utf-8")
+        resolved.write_text(result_text, encoding="utf-8", newline=newline)
         symbols.invalidate(resolved)
 
     result = {
