@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import json
+import re
 import sqlite3
 import uuid
 from datetime import UTC, datetime
@@ -49,7 +50,40 @@ def _conn() -> sqlite3.Connection:
         if col not in existing_cols:
             conn.execute(stmt)
             conn.commit()
+    _ensure_fts(conn)
     return conn
+
+
+def _ensure_fts(conn: sqlite3.Connection) -> None:
+    """Maintain a standalone FTS5 index (keyed by memory id) via triggers; backfill when out of sync."""
+    conn.executescript(
+        """
+        CREATE VIRTUAL TABLE IF NOT EXISTS memories_fts
+            USING fts5(id UNINDEXED, content, tags, tokenize='unicode61 remove_diacritics 2');
+        CREATE TRIGGER IF NOT EXISTS memories_fts_ai AFTER INSERT ON memories BEGIN
+            INSERT INTO memories_fts (id, content, tags) VALUES (new.id, new.content, new.tags);
+        END;
+        CREATE TRIGGER IF NOT EXISTS memories_fts_ad AFTER DELETE ON memories BEGIN
+            DELETE FROM memories_fts WHERE id = old.id;
+        END;
+        CREATE TRIGGER IF NOT EXISTS memories_fts_au AFTER UPDATE OF content, tags ON memories BEGIN
+            DELETE FROM memories_fts WHERE id = old.id;
+            INSERT INTO memories_fts (id, content, tags) VALUES (new.id, new.content, new.tags);
+        END;
+        """
+    )
+    total = conn.execute("SELECT COUNT(*) FROM memories").fetchone()[0]
+    indexed = conn.execute("SELECT COUNT(*) FROM memories_fts").fetchone()[0]
+    if total != indexed:
+        conn.execute("DELETE FROM memories_fts")
+        conn.execute("INSERT INTO memories_fts (id, content, tags) SELECT id, content, tags FROM memories")
+        conn.commit()
+
+
+def _fts_query(query: str) -> str:
+    """Build an OR query of quoted tokens; longer tokens also match as prefixes."""
+    terms = [f'"{tok}"*' if len(tok) >= 3 else f'"{tok}"' for tok in re.findall(r"\w+", query)]
+    return " OR ".join(terms)
 
 
 def _iso_now() -> str:
@@ -99,67 +133,60 @@ def recall(
     type: MemoryType | str = "",
     tags: list[str] | None = None,
     k: int = 10,
-    rerank: bool = False,
     since: str = "",
     until: str = "",
     include_score: bool = False,
     scope_path: str = "",
 ) -> list[dict[str, object]]:
-    del rerank
     conn = _conn()
-    sql = "SELECT * FROM memories WHERE 1=1"
-    params: list[object] = []
-    if scope:
-        sql += " AND scope = ?"
-        params.append(scope)
-    if scope_path:
-        sql += " AND scope_path = ?"
-        params.append(scope_path)
-    if type:
-        sql += " AND type = ?"
-        params.append(type)
+    where = ["(m.expires_at = '' OR m.expires_at >= ?)"]
+    params: list[object] = [_iso_now()]
+    for column, value in (("scope", scope), ("scope_path", scope_path), ("type", type)):
+        if value:
+            where.append(f"m.{column} = ?")
+            params.append(value)
     if since:
-        sql += " AND created_at >= ?"
+        where.append("m.created_at >= ?")
         params.append(since)
     if until:
-        sql += " AND created_at <= ?"
+        where.append("m.created_at <= ?")
         params.append(until)
-    sql += " ORDER BY updated_at DESC"
+    required_tags = set(_parse_tags(tags))
+    q = query.strip()
+    match = _fts_query(q)
+    if match:
+        # bm25() is lower-is-better (negative); exact phrase containment gets a fixed bonus.
+        sql = (
+            "SELECT m.*, -bm25(memories_fts, 0.0, 1.0, 0.5) + (CASE WHEN instr(lower(m.content), ?) > 0 "
+            "THEN 1.0 ELSE 0.0 END) AS score FROM memories_fts JOIN memories m ON m.id = memories_fts.id "
+            f"WHERE memories_fts MATCH ? AND {' AND '.join(where)} ORDER BY score DESC, m.updated_at DESC"
+        )
+        params = [q.lower(), match, *params]
+    else:
+        sql = f"SELECT m.*, 0.0 AS score FROM memories m WHERE {' AND '.join(where)} ORDER BY m.updated_at DESC"
     rows = conn.execute(sql, params).fetchall()
     conn.close()
-    q = query.lower().strip()
-    required_tags = set(_parse_tags(tags))
-    scored: list[tuple[float, sqlite3.Row]] = []
-    for row in rows:
-        row_tags = set(json.loads(row["tags"]))
-        if required_tags and not (required_tags & row_tags):
-            continue
-        content = str(row["content"]).lower()
-        score = 1.0 if q and q in content else 0.0
-        if q and score == 0.0:
-            tokens = [tok for tok in q.split() if tok]
-            hits = sum(1 for tok in tokens if tok in content)
-            score = hits / max(1, len(tokens))
-        if q and score == 0.0:
-            continue
-        scored.append((score, row))
-    scored.sort(key=lambda item: item[0], reverse=True)
     result: list[dict[str, object]] = []
-    for score, row in scored[: max(1, k)]:
+    for row in rows:
+        row_tags = json.loads(row["tags"])
+        if required_tags and not (required_tags & set(row_tags)):
+            continue
         item = {
             "id": row["id"],
             "content": row["content"],
             "type": row["type"],
             "scope": row["scope"],
             "scope_path": row["scope_path"],
-            "tags": json.loads(row["tags"]),
+            "tags": row_tags,
             "source": row["source"],
             "created_at": row["created_at"],
             "updated_at": row["updated_at"],
         }
         if include_score:
-            item["score"] = score
+            item["score"] = row["score"]
         result.append(item)
+        if len(result) >= max(1, k):
+            break
     return result
 
 
@@ -408,11 +435,6 @@ def purge_expired() -> str:
     return f"Purged {result.rowcount} expired memories."
 
 
-def reembed_all(batch_size: int = 64) -> dict:
-    del batch_size
-    return {"status": "No embedding backend configured in initial migration."}
-
-
 def fusion_core_health() -> dict[str, str]:
     return {"domain": "core", "status": "ready"}
 
@@ -430,5 +452,4 @@ def register(mcp: FastMCP) -> None:
     mcp.tool(export_memories)
     mcp.tool(memory_stats)
     mcp.tool(purge_expired)
-    mcp.tool(reembed_all)
     mcp.tool(name="fusion_core_health")(fusion_core_health)

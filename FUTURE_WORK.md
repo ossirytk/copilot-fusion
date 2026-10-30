@@ -3,17 +3,11 @@
 Direction and definition of done live in [`SCOPE.md`](SCOPE.md). Only two tracks remain;
 anything else is maintenance (dependency bumps, MCP spec compatibility, bug fixes).
 
-## 1. Memory retrieval
+## 1. Memory retrieval — done
 
-**Why:** `recall` is substring/tag scoring; `rerank` is ignored and `reembed_all` is a stub.
-
-**Deliverables**
-- Small eval set (query → expected memories) in `tests/`.
-- Real retrieval: SQLite FTS5 as the baseline; embeddings (e.g. sqlite-vec) only if the eval shows FTS5 is insufficient.
-- Written scope rules for repo / user / session memories, and optional expiry.
-- Remove or implement `rerank` and `reembed_all`.
-
-**Done when:** the eval passes with a stated threshold and the stub parameters are gone.
+FTS5/bm25 `recall`, expiry filtering, written scope rules (`packages/contextwell-core/README.md`),
+an eval test (`tests/test_memory_retrieval_eval.py`), and removal of the `rerank` / `reembed_all` stubs.
+Embeddings are only worth adding if real misses show up in the eval; add the failing case first.
 
 ## 2. Tree-sitter `symbol_search`
 

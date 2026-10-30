@@ -360,13 +360,6 @@ def test_purge_expired() -> None:
     assert "Purged" in result
 
 
-def test_reembed_all() -> None:
-    """reembed_all returns a status message."""
-    result = _call("reembed_all", {})
-    assert isinstance(result, dict)
-    assert "status" in result
-
-
 # ---------------------------------------------------------------------------
 # Tools registry tests
 # ---------------------------------------------------------------------------

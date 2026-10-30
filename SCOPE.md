@@ -8,7 +8,7 @@ they do not provide. This file is the contract for when the project is "done".
 
 1. **Memory** (`remember`, `recall`, `list_memories`, `update`, `forget`, plus admin tools)
    - Cross-session, scoped (repo / user / session) storage.
-   - Retrieval is real: embeddings or SQLite FTS5, not substring matching.
+   - Retrieval is real: SQLite FTS5/bm25 (embeddings only if the eval demands them).
    - Retrieval quality is checked by a small eval set in `tests/`.
 2. **Code navigation** (`symbol_search`)
    - Tree-sitter backed definitions, references and callers.
@@ -25,7 +25,7 @@ No new tools are added here; behavior changes only for bugs and safety.
 
 `fs_tree`, `json_select`, `yaml_select`, `file_hash`, `remember_file`, `remember_batch`,
 `apply_text_patch_batch`, `diff_files`, `git_diff`,
-`reembed_all` (until real embeddings exist), the `fusion_*_health` family, and `fusion_api_compat`
+the `fusion_*_health` family, and `fusion_api_compat`
 (migration from contextwell/gitpilot/toolpilot/diffpilot is complete).
 
 ## Explicitly out of scope
@@ -35,7 +35,7 @@ and any new tool that duplicates a client-native capability.
 
 ## Done when
 
-- [ ] `recall` uses real retrieval and has an eval test.
+- [x] `recall` uses real retrieval (FTS5/bm25) and has an eval test.
 - [ ] `symbol_search` uses Tree-sitter for Python, TS/JS and one more language.
 - [ ] `FUSION_PROFILE` (`core` | `full`) gates the portable profile.
 - [ ] Deprecated tools are removed; README and `FUTURE_WORK.md` match this file.

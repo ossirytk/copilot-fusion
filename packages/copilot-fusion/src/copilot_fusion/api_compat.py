@@ -18,7 +18,6 @@ CONTEXTWELL_TOOLS = {
     "export_memories",
     "memory_stats",
     "purge_expired",
-    "reembed_all",
 }
 
 GITPILOT_TOOLS = {
