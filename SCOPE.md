@@ -36,7 +36,7 @@ and any new tool that duplicates a client-native capability.
 ## Done when
 
 - [x] `recall` uses real retrieval (FTS5/bm25) and has an eval test.
-- [ ] `symbol_search` uses Tree-sitter for Python, TS/JS and one more language.
+- [x] `symbol_search` uses Tree-sitter for Python, TS/JS and Go.
 - [ ] `FUSION_PROFILE` (`core` | `full`) gates the portable profile.
 - [ ] Deprecated tools are removed; README and `FUTURE_WORK.md` match this file.
 - [ ] CI is green on Linux and Windows.

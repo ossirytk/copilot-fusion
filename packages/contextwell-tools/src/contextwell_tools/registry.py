@@ -6,7 +6,7 @@ import hashlib
 import json
 import os
 import re
-from collections import Counter, OrderedDict, deque
+from collections import Counter, deque
 from pathlib import Path
 from statistics import mean
 from typing import Any
@@ -16,6 +16,7 @@ from urllib.request import Request, urlopen
 from copilot_fusion_shared import resolve_path
 from fastmcp import FastMCP
 
+from contextwell_tools import symbols
 from contextwell_tools.execution import register_execution
 
 try:
@@ -30,8 +31,6 @@ except ModuleNotFoundError:  # pragma: no cover
 
 
 _REQUESTS = Counter()
-_FILE_LINE_CACHE: OrderedDict[Path, tuple[int, int, list[str]]] = OrderedDict()
-_FILE_LINE_CACHE_MAXSIZE = 512
 _DEFAULT_SIGNAL_RE = re.compile(
     r"\b(error|warn|warning|fail|failed|exception|traceback|fatal|panic|timeout)\b", re.IGNORECASE
 )
@@ -41,34 +40,6 @@ _PATH_RE = re.compile(r"(/[\w.\-]+(?:/[\w.\-]+)+)")
 _TS_RE = re.compile(r"\b\d{4}-\d{2}-\d{2}[T ][0-2]\d:[0-5]\d:[0-5]\d(?:\.\d+)?(?:Z|[+-]\d{2}:\d{2})?\b")
 _CLASSLIKE_RE = re.compile(r"\b([A-Z][A-Za-z0-9_]*(?:Error|Exception|Warning))\b")
 _SENTENCE_SPLIT_RE = re.compile(r"(?<=[.!?])\s+")
-_PY_FUNCTION_RE = re.compile(r"^\s*def\s+([A-Za-z_]\w*)\s*\(")
-_PY_CLASS_RE = re.compile(r"^\s*class\s+([A-Za-z_]\w*)\b")
-_PY_VARIABLE_RE = re.compile(r"^([A-Za-z_]\w*)\s*=\s*.+")
-_JS_FUNCTION_RE = re.compile(r"^\s*(?:export\s+)?(?:async\s+)?function\s+([A-Za-z_$]\w*)\s*\(")
-_JS_CLASS_RE = re.compile(r"^\s*(?:export\s+)?class\s+([A-Za-z_$]\w*)\b")
-_JS_VARIABLE_RE = re.compile(r"^\s*(?:export\s+)?(?:const|let|var)\s+([A-Za-z_$]\w*)\s*=")
-_JS_ARROW_FN_RE = re.compile(r"^\s*(?:export\s+)?(?:const|let|var)\s+([A-Za-z_$]\w*)\s*=\s*(?:async\s*)?\(?.*\)?\s*=>")
-_CALL_EXPR_RE = re.compile(r"(?:^|[^A-Za-z0-9_$])((?:[A-Za-z_$][\w$]*\.)*[A-Za-z_$][\w$]*)\s*\(")
-_DECL_PREFIX_RE = re.compile(r"(?:def|function|class)\s+$")
-_CALL_EXPR_EXCLUDE = {
-    "await",
-    "catch",
-    "class",
-    "delete",
-    "for",
-    "function",
-    "if",
-    "new",
-    "return",
-    "super",
-    "switch",
-    "this",
-    "throw",
-    "try",
-    "typeof",
-    "while",
-    "yield",
-}
 
 
 def _project(node: Any, field: str) -> Any:
@@ -173,75 +144,6 @@ def _extract_entities(text: str, max_per_type: int = 5, max_total: int | None = 
     return entities
 
 
-def _advance_js_literal_char(ch: str, state: str, escaped: bool) -> tuple[str, bool]:
-    """Return updated (state, escaped) after reading a character inside a JS literal/regex."""
-    if escaped:
-        return state, False
-    if ch == "\\":
-        return state, True
-    if state == "single" and ch == "'":
-        return "", False
-    if state == "double" and ch == '"':
-        return "", False
-    if state == "template" and ch == "`":
-        return "", False
-    if state == "regex" and ch == "/":
-        return "", False
-    return state, False
-
-
-def _strip_js_literal_noise(line: str) -> str:
-    result: list[str] = []
-    state = ""  # "single" | "double" | "template" | "regex" | ""
-    escaped = False
-    prev_sig = ""
-    i = 0
-    while i < len(line):
-        ch = line[i]
-        if state:
-            result.append(" ")
-            state, escaped = _advance_js_literal_char(ch, state, escaped)
-        else:
-            if ch == "/" and i + 1 < len(line) and line[i + 1] == "/":
-                break
-            if ch in ("'", '"', "`"):
-                state = {"'": "single", '"': "double", "`": "template"}[ch]
-                result.append(" ")
-            elif ch == "/":
-                if prev_sig == "" or prev_sig in "([{:;=,!?&|^~<>+-*%":
-                    state = "regex"
-                    result.append(" ")
-                else:
-                    result.append(ch)
-                    prev_sig = ch
-            else:
-                result.append(ch)
-                if not ch.isspace():
-                    prev_sig = ch
-        i += 1
-    return "".join(result)
-
-
-def _read_cached_lines(path: Path) -> list[str] | None:
-    try:
-        stat = path.stat()
-    except OSError:
-        return None
-    cache_key = (stat.st_mtime_ns, stat.st_size)
-    cached = _FILE_LINE_CACHE.get(path)
-    if cached and cached[0] == cache_key[0] and cached[1] == cache_key[1]:
-        _FILE_LINE_CACHE.move_to_end(path)
-        return cached[2]
-    try:
-        lines = path.read_text(encoding="utf-8").splitlines()
-    except (OSError, UnicodeDecodeError):
-        return None
-    if path not in _FILE_LINE_CACHE and len(_FILE_LINE_CACHE) >= _FILE_LINE_CACHE_MAXSIZE:
-        _FILE_LINE_CACHE.popitem(last=False)
-    _FILE_LINE_CACHE[path] = (cache_key[0], cache_key[1], lines)
-    return lines
-
-
 def _remote_text_summary(text: str, max_sentences: int, endpoint: str, token: str = "") -> dict[str, object]:
     payload = json.dumps({"text": text, "max_sentences": max_sentences}).encode("utf-8")
     headers = {"Content-Type": "application/json"}
@@ -281,244 +183,6 @@ def _remote_text_summary(text: str, max_sentences: int, endpoint: str, token: st
         "bullets": [str(item) for item in bullets[: max(1, max_sentences)]],
         "stats": stats,
         "backend": "remote",
-    }
-
-
-def _match_symbol_from_line(line: str, language: str, selected_kinds: set[str]) -> tuple[str, str]:
-    if language == "python":
-        if "function" in selected_kinds:
-            match = _PY_FUNCTION_RE.match(line)
-            if match:
-                return "function", match.group(1)
-        if "class" in selected_kinds:
-            match = _PY_CLASS_RE.match(line)
-            if match:
-                return "class", match.group(1)
-        if "variable" in selected_kinds:
-            match = _PY_VARIABLE_RE.match(line)
-            if match:
-                return "variable", match.group(1)
-        return "", ""
-
-    if "function" in selected_kinds:
-        match = _JS_FUNCTION_RE.match(line) or _JS_ARROW_FN_RE.match(line)
-        if match:
-            return "function", match.group(1)
-    if "class" in selected_kinds:
-        match = _JS_CLASS_RE.match(line)
-        if match:
-            return "class", match.group(1)
-    if "variable" in selected_kinds:
-        match = _JS_VARIABLE_RE.match(line)
-        if match:
-            return "variable", match.group(1)
-    return "", ""
-
-
-def _collect_references(
-    files: list[tuple[Path, str]],
-    symbol: str,
-    symbol_kind: str,
-    declaration_path: str,
-    declaration_line: int,
-    max_items: int,
-    include_callsites: bool = False,
-    file_cache: dict[Path, list[str]] | None = None,
-) -> list[dict[str, object]]:
-    pattern = re.compile(rf"\b{re.escape(symbol)}\b")
-    call_pattern = re.compile(rf"\b{re.escape(symbol)}\s*\(")
-    references: list[dict[str, object]] = []
-    for candidate, language in files:
-        lines = file_cache.get(candidate) if file_cache is not None else None
-        if lines is None:
-            lines = _read_cached_lines(candidate)
-            if lines is None:
-                continue
-            if file_cache is not None:
-                file_cache[candidate] = lines
-        for line_no, line in enumerate(lines, start=1):
-            if str(candidate) == declaration_path and line_no == declaration_line:
-                continue
-            if not pattern.search(line):
-                continue
-            match_type = "reference"
-            stripped = line.strip()
-            if include_callsites and symbol_kind == "function":
-                is_declaration = False
-                if language == "python":
-                    is_declaration = bool(stripped.startswith(f"def {symbol}("))
-                else:
-                    is_declaration = bool(
-                        re.match(rf"^(?:export\s+)?(?:async\s+)?function\s+{re.escape(symbol)}\s*\(", stripped)
-                    )
-                if not is_declaration and call_pattern.search(line):
-                    match_type = "callsite"
-            references.append(
-                {
-                    "path": str(candidate),
-                    "line": line_no,
-                    "language": language,
-                    "snippet": line.strip(),
-                    "match_type": match_type,
-                }
-            )
-            if len(references) >= max_items:
-                return references
-    return references
-
-
-def _owner_map_for_file(file_lines: list[str], language: str) -> dict[int, str]:
-    owners: dict[int, str] = {}
-    if language == "python":
-        stack: list[tuple[int, str]] = []
-        for line_no, line in enumerate(file_lines, start=1):
-            stripped = line.strip()
-            indent = len(line) - len(line.lstrip(" "))
-            while stack and indent <= stack[-1][0] and stripped:
-                stack.pop()
-            match = _PY_FUNCTION_RE.match(line)
-            if match:
-                stack.append((indent, match.group(1)))
-            owners[line_no] = stack[-1][1] if stack else "<module>"
-        return owners
-
-    # javascript/typescript: lightweight brace-based ownership
-    stack_js: list[tuple[int, str]] = []
-    brace_depth = 0
-    for line_no, line in enumerate(file_lines, start=1):
-        stripped = line.strip()
-        while stack_js and brace_depth <= stack_js[-1][0]:
-            stack_js.pop()
-        match = _JS_FUNCTION_RE.match(line) or _JS_ARROW_FN_RE.match(line)
-        if match:
-            stack_js.append((brace_depth, match.group(1)))
-        owners[line_no] = stack_js[-1][1] if stack_js else "<module>"
-        brace_safe_line = _strip_js_literal_noise(stripped)
-        open_count = brace_safe_line.count("{")
-        close_count = brace_safe_line.count("}")
-        brace_depth = max(0, brace_depth + open_count - close_count)
-    return owners
-
-
-def _declaration_body_range(file_lines: list[str], language: str, declaration_line: int) -> tuple[int, int]:
-    if declaration_line < 1 or declaration_line > len(file_lines):
-        return declaration_line, declaration_line
-
-    if language == "python":
-        declaration_indent = len(file_lines[declaration_line - 1]) - len(file_lines[declaration_line - 1].lstrip(" "))
-        end_line = len(file_lines)
-        for line_no in range(declaration_line + 1, len(file_lines) + 1):
-            line = file_lines[line_no - 1]
-            stripped = line.strip()
-            if not stripped:
-                continue
-            indent = len(line) - len(line.lstrip(" "))
-            if indent <= declaration_indent:
-                end_line = line_no - 1
-                break
-        return declaration_line, max(declaration_line, end_line)
-
-    brace_depth = 0
-    saw_open = False
-    end_line = len(file_lines)
-    for line_no in range(declaration_line, len(file_lines) + 1):
-        line = _strip_js_literal_noise(file_lines[line_no - 1])
-        open_count = line.count("{")
-        close_count = line.count("}")
-        brace_depth += open_count - close_count
-        if open_count > 0:
-            saw_open = True
-        if saw_open and brace_depth <= 0 and line_no > declaration_line:
-            end_line = line_no
-            break
-    return declaration_line, max(declaration_line, end_line)
-
-
-def _collect_callgraph(
-    files: list[tuple[Path, str]],
-    symbol: str,
-    symbol_kind: str,
-    declaration_path: str,
-    declaration_line: int,
-    max_items: int,
-    file_cache: dict[Path, list[str]] | None = None,
-) -> dict[str, object]:
-    if symbol_kind != "function":
-        return {"callers": [], "sites": [], "callees": [], "callee_sites": [], "truncated": False}
-
-    call_pattern = re.compile(rf"\b{re.escape(symbol)}\s*\(")
-    callee_pattern = _CALL_EXPR_RE
-    callers: set[str] = set()
-    sites: list[dict[str, object]] = []
-    callee_counts: Counter[str] = Counter()
-    callee_sites: list[dict[str, object]] = []
-    truncated = False
-
-    for candidate, language in files:
-        lines = file_cache.get(candidate) if file_cache is not None else None
-        if lines is None:
-            lines = _read_cached_lines(candidate)
-            if lines is None:
-                continue
-            if file_cache is not None:
-                file_cache[candidate] = lines
-        owners = _owner_map_for_file(lines, language)
-        declaration_body_start, declaration_body_end = (
-            _declaration_body_range(lines, language, declaration_line)
-            if str(candidate) == declaration_path
-            else (0, -1)
-        )
-        for line_no, line in enumerate(lines, start=1):
-            if str(candidate) == declaration_path and line_no == declaration_line:
-                continue
-            sanitized = _strip_js_literal_noise(line) if language != "python" else line
-            if not call_pattern.search(sanitized):
-                pass
-            else:
-                owner = owners.get(line_no, "<module>")
-                callers.add(owner)
-                if len(sites) < max_items:
-                    sites.append(
-                        {
-                            "path": str(candidate),
-                            "line": line_no,
-                            "language": language,
-                            "caller": owner,
-                            "snippet": line.strip(),
-                        }
-                    )
-                else:
-                    truncated = True
-
-            if not (str(candidate) == declaration_path and declaration_body_start <= line_no <= declaration_body_end):
-                continue
-            for match in callee_pattern.finditer(sanitized):
-                callee = match.group(1)
-                if callee == symbol or callee in _CALL_EXPR_EXCLUDE:
-                    continue
-                if _DECL_PREFIX_RE.search(sanitized[: match.start(1)]):
-                    continue
-                callee_counts[callee] += 1
-                if len(callee_sites) < max_items:
-                    callee_sites.append(
-                        {
-                            "path": str(candidate),
-                            "line": line_no,
-                            "language": language,
-                            "callee": callee,
-                            "snippet": line.strip(),
-                        }
-                    )
-                else:
-                    truncated = True
-
-    return {
-        "callers": sorted(callers),
-        "sites": sites,
-        "site_count": len(sites),
-        "callees": [{"symbol": name, "count": count} for name, count in callee_counts.most_common()],
-        "callee_sites": callee_sites,
-        "truncated": truncated,
     }
 
 
@@ -756,91 +420,6 @@ def _apply_parsed_edits(lines: list[str], parsed_edits: list[dict[str, object]])
             continue
         updated_lines[start_idx:end_line] = replacement
     return updated_lines
-
-
-def _collect_candidate_files(paths: list[str]) -> list[tuple[Path, str]]:
-    """Resolve paths and find source code candidates for symbol search."""
-    candidates: list[tuple[Path, str]] = []
-    for source in paths:
-        resolved = resolve_path(source)
-        if resolved.is_dir():
-            for suffix, language in (
-                ("*.py", "python"),
-                ("*.js", "javascript"),
-                ("*.jsx", "javascript"),
-                ("*.mjs", "javascript"),
-                ("*.cjs", "javascript"),
-                ("*.ts", "typescript"),
-                ("*.tsx", "typescript"),
-            ):
-                candidates.extend([(p, language) for p in resolved.rglob(suffix) if p.is_file()])
-        elif resolved.is_file():
-            suffix = resolved.suffix.lower()
-            if suffix == ".py":
-                candidates.append((resolved, "python"))
-            elif suffix in {".js", ".jsx", ".mjs", ".cjs"}:
-                candidates.append((resolved, "javascript"))
-            elif suffix in {".ts", ".tsx"}:
-                candidates.append((resolved, "typescript"))
-    return candidates
-
-
-def _build_symbol_item(
-    candidate: Path,
-    language: str,
-    line_no: int,
-    line: str,
-    symbol_name: str,
-    symbol_kind: str,
-    candidates: list[tuple[Path, str]],
-    file_cache: dict[Path, list[str]],
-    include_references: bool,
-    include_callsites: bool,
-    max_references_per_symbol: int,
-    include_callgraph: bool,
-    max_callgraph_edges: int,
-) -> dict[str, object]:
-    """Build a symbol result item with optional references and callgraph."""
-    column = line.find(symbol_name) + 1
-    indent = len(line) - len(line.lstrip(" "))
-    item: dict[str, object] = {
-        "path": str(candidate),
-        "line": line_no,
-        "column": column if column > 0 else 1,
-        "symbol": symbol_name,
-        "kind": symbol_kind,
-        "language": language,
-        "signature": line.strip(),
-        "indent": indent,
-    }
-    if include_references:
-        refs = _collect_references(
-            candidates,
-            symbol=symbol_name,
-            symbol_kind=symbol_kind,
-            declaration_path=str(candidate),
-            declaration_line=line_no,
-            max_items=max(1, max_references_per_symbol),
-            include_callsites=include_callsites,
-            file_cache=file_cache,
-        )
-        item["references"] = {
-            "count": len(refs),
-            "callsite_count": sum(1 for ref in refs if ref.get("match_type") == "callsite"),
-            "items": refs,
-            "truncated": len(refs) >= max(1, max_references_per_symbol),
-        }
-    if include_callgraph:
-        item["callgraph"] = _collect_callgraph(
-            candidates,
-            symbol=symbol_name,
-            symbol_kind=symbol_kind,
-            declaration_path=str(candidate),
-            declaration_line=line_no,
-            max_items=max(1, max_callgraph_edges),
-            file_cache=file_cache,
-        )
-    return item
 
 
 def fs_glob(base_path: str, patterns: list[str], max_results: int = 5000) -> dict[str, object]:
@@ -1154,7 +733,7 @@ def apply_text_patch(
     if not dry_run and changed:
         resolved.parent.mkdir(parents=True, exist_ok=True)
         resolved.write_text(result_text, encoding="utf-8")
-        _FILE_LINE_CACHE.pop(resolved, None)
+        symbols.invalidate(resolved)
 
     result = {
         "path": str(resolved),
@@ -1248,11 +827,14 @@ def symbol_search(
     include_callgraph: bool = False,
     max_callgraph_edges: int = 50,
 ) -> dict[str, object]:
-    """Search for symbols (functions, classes, variables) in source files.
+    """Find definitions (Tree-sitter parsed) in Python, JavaScript/TypeScript (incl. JSX/TSX) and Go files.
 
-    Supported ``kinds`` values are ``"function"``, ``"class"``, and
-    ``"variable"``.  Language-specific names such as ``fn``, ``enum``, or
-    ``variant`` are not valid; use the generic names above instead.
+    Supported ``kinds`` values are ``"function"`` (functions and methods), ``"class"`` (classes, plus
+    TS interfaces/enums/type aliases and Go types) and ``"variable"`` (module-level only).  Each result has
+    ``path``, ``line``, ``column``, ``end_line``, ``symbol``, ``kind`` and ``parent`` (enclosing class/receiver),
+    so it can feed ``read_file`` or ``apply_text_patch`` directly.  References and call graphs match by name
+    across the given ``paths`` (no import/type resolution); comments and strings are ignored.  When other
+    definitions share the name, ``same_name_definitions`` reports how many, as a hint that results may be mixed.
     """
     _REQUESTS["symbol_search"] += 1
     if not paths:
@@ -1264,39 +846,44 @@ def symbol_search(
     if invalid_kinds:
         return {"error": f"Invalid kinds: {sorted(invalid_kinds)}. Allowed kinds: {sorted(allowed_kinds)}"}
 
-    candidates = _collect_candidate_files(paths)
+    indexes = symbols.collect_indexes(paths)
     q = query.lower().strip()
+    needs_context = include_references or include_callgraph
+    name_counts = symbols.count_same_name(indexes) if needs_context else None
     results: list[dict[str, object]] = []
-    file_cache: dict[Path, list[str]] = {}
 
-    for candidate, language in candidates:
-        file_lines = file_cache.get(candidate)
-        if file_lines is None:
-            file_lines = _read_cached_lines(candidate)
-            if file_lines is None:
+    for index in indexes:
+        for definition in index.definitions:
+            if definition.kind not in selected_kinds or (q and q not in definition.name.lower()):
                 continue
-            file_cache[candidate] = file_lines
-        for line_no, line in enumerate(file_lines, start=1):
-            symbol_kind, symbol_name = _match_symbol_from_line(line, language=language, selected_kinds=selected_kinds)
-            if not symbol_kind:
-                continue
-            if q and q not in symbol_name.lower():
-                continue
-            item = _build_symbol_item(
-                candidate=candidate,
-                language=language,
-                line_no=line_no,
-                line=line,
-                symbol_name=symbol_name,
-                symbol_kind=symbol_kind,
-                candidates=candidates,
-                file_cache=file_cache,
-                include_references=include_references,
-                include_callsites=include_callsites,
-                max_references_per_symbol=max_references_per_symbol,
-                include_callgraph=include_callgraph,
-                max_callgraph_edges=max_callgraph_edges,
-            )
+            signature, indent = symbols.signature_of(index, definition)
+            item: dict[str, object] = {
+                "path": str(index.path),
+                "line": definition.line,
+                "column": definition.column,
+                "end_line": definition.end_line,
+                "symbol": definition.name,
+                "kind": definition.kind,
+                "parent": definition.parent,
+                "language": index.language,
+                "signature": signature,
+                "indent": indent,
+            }
+            if name_counts is not None:
+                others = name_counts[(definition.name, definition.kind)] - 1
+                if others > 0:
+                    item["same_name_definitions"] = others
+            if include_references:
+                limit = max(1, max_references_per_symbol)
+                refs = symbols.find_references(indexes, definition, index, include_callsites, limit)
+                item["references"] = {
+                    "count": len(refs),
+                    "callsite_count": sum(1 for ref in refs if ref.get("match_type") == "callsite"),
+                    "items": refs,
+                    "truncated": len(refs) >= limit,
+                }
+            if include_callgraph:
+                item["callgraph"] = symbols.build_callgraph(indexes, definition, index, max(1, max_callgraph_edges))
             results.append(item)
             if len(results) >= max(1, max_results):
                 return {"results": results, "truncated": True}

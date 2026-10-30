@@ -9,16 +9,12 @@ FTS5/bm25 `recall`, expiry filtering, written scope rules (`packages/contextwell
 an eval test (`tests/test_memory_retrieval_eval.py`), and removal of the `rerank` / `reembed_all` stubs.
 Embeddings are only worth adding if real misses show up in the eval; add the failing case first.
 
-## 2. Tree-sitter `symbol_search`
+## 2. Tree-sitter `symbol_search` — done
 
-**Why:** current Python AST + JS/TS regex coverage is shallow for references and callers.
-
-**Deliverables**
-- Tree-sitter backend for definitions, references and callers.
-- Python and TS/JS first, then one additional language.
-- Keep the existing result shape (path, line/range, name) so results feed `read_file` and `apply_text_patch`.
-
-**Done when:** cross-file "who calls this?" works for the three languages, with tests.
+`packages/contextwell-tools/src/contextwell_tools/symbols.py` indexes Python, JS/TS/JSX/TSX and Go
+(definitions incl. methods with `parent`, calls, identifier references), cached by mtime. Limits: matching is
+by name with no import/type resolution (results flag `same_name_definitions`). Add a language by adding a
+`_Lang` subclass and a grammar dependency; consider LSP only if name-based precision proves insufficient.
 
 ## 3. Housekeeping required by SCOPE.md
 
