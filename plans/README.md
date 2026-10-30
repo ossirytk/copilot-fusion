@@ -1,10 +1,11 @@
 # copilot-fusion plans
 
-This directory holds the follow-up implementation plans for missing Copilot-assistance features.
+> Historical design notes for features that are already implemented. Current direction and
+> definition of done: [`../SCOPE.md`](../SCOPE.md); remaining work: [`../FUTURE_WORK.md`](../FUTURE_WORK.md).
+> Sections in these files describing "future" phases may be out of date or out of scope.
 
-## Tracks
+## Notes
 
-- `follow-up-roadmap.md` — consolidated roadmap for remaining enhancement work
 - `text-distillation.md` — deterministic text compaction and optional summarization
 - `safe-editing.md` — patch-based file editing with guardrails
 - `code-navigation.md` — symbol-aware navigation and lookup

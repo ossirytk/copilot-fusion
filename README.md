@@ -126,57 +126,35 @@ FUSION_ENABLE_CORE=0 FUSION_ENABLE_GIT=1 FUSION_ENABLE_TOOLS=1 FUSION_ENABLE_DIF
 
 Base MCP config example is provided in `mcp-config.example.json`.
 
-## Migration Guide (contextwell + gitpilot + toolpilot → copilot-fusion)
+## Scope and Roadmap
 
-1. Install and configure `copilot-fusion` as your primary server.
-2. Disable `contextwell`, `gitpilot`, `toolpilot`, and `diffpilot` in your MCP client config.
-3. Keep the same tool names in prompts; the merged server preserves the original surface for the migrated domains.
-4. Validate coverage with `fusion_api_compat` after startup.
+See [`SCOPE.md`](SCOPE.md) for what this server is for and when it is done, and
+[`FUTURE_WORK.md`](FUTURE_WORK.md) for the two remaining tracks (memory retrieval and
+Tree-sitter `symbol_search`). Everything else is maintenance. `plans/` holds historical
+design notes for the implemented features.
 
-### Tool-surface status
+Fusion's unique value is cross-session memory and code navigation. The file, git, diff and
+terminal tools are a portable, bounded layer for clients without a reliable shell (VS Code on
+Windows/WSL); prefer the client's native tools when they are available.
 
-| Source server | Coverage in fusion | Notes |
-|---|---|---|
-| `contextwell` | Full initial surface | Implemented in `contextwell-core` domain |
-| `gitpilot` | Full initial surface | Implemented in `contextwell-git` domain |
-| `toolpilot` | Full initial surface | Implemented in `contextwell-tools` domain |
-| `diffpilot` | Full initial surface | Implemented in `contextwell-diff` domain |
+## Migrating from contextwell / gitpilot / toolpilot / diffpilot
 
-## Optional Tools Strategy
+These servers are merged into fusion with the same tool names. Disable the old servers in your
+MCP client config and keep prompts unchanged. `fusion_api_compat` reports the surface at runtime
+(scheduled for removal, see `SCOPE.md`).
 
-The non-core pilot tools remain standalone and can run beside fusion:
+## Optional standalone servers
 
-- `feedpilot`
-- `benchpilot`
-- `envpilot`
-- `httppilot`
-- `shellpilot`
-- `snippetpilot`
-- `diffpilot`
-
-Use `mcp-config.optional.example.json` as a template when you want fusion + optional tools together.
-
-## Roadmap
-
-The next feature tracks are being implemented one at a time:
-
-- text distillation / compaction (phase 1 `text_compact`, phase 2 local extractive `text_summarize`, phase 3 remote/model-backed `text_summarize` via `FUSION_TEXT_SUMMARIZER_URL`, optional summary entities, and optional `read_file` compact mode are implemented)
-- safe file editing (phase 1 guarded `apply_text_patch` + phase 2 richer edit ops/diagnostics + structured previews + multi-file batch editing are implemented)
-- code navigation / symbol awareness (phase 1 Python + phase 2 JS/TS/JSX/TSX coverage, callsite references, caller/callee callgraph extraction, and mtime-based file caching in `symbol_search` are implemented)
-- unified VCS with Jujutsu (jj) colocation (automatic `.jj` workspace detection, semantic mapping of `git_*` operations to native `jj` commands, first-class conflict metadata, and `fusion_git_health` status reporting are implemented)
+`feedpilot`, `benchpilot`, `envpilot`, `httppilot`, `shellpilot` and `snippetpilot` are separate
+projects that can run beside fusion; see `mcp-config.optional.example.json`. They are not part of
+this repository.
 
 ## Copilot skill guidance
 
-For best model performance with this server:
-
-- disable legacy overlapping skills (`contextwell`, `gitpilot`, `toolpilot`, `diffpilot`) when `copilot-fusion` is enabled
-- guide the model to prefer fusion tools over internal assumptions for memory and compaction:
-  - use `recall` / `list_memories` for remembered context
-  - use `text_compact` for deterministic signal extraction
-  - use `text_summarize` for narrative summary
-  - use `read_file(compact=true)` when bounded file reads and compaction are both needed in one call
-
-See `plans/README.md` for the implementation plan files.
+- Disable the legacy overlapping servers (`contextwell`, `gitpilot`, `toolpilot`, `diffpilot`).
+- Use `recall` / `list_memories` for remembered context across sessions.
+- Use `text_compact` / `text_summarize` (or `read_file(compact=true)`) for large logs and files.
+- In clients with native file/search/edit/shell tools, prefer those over the fusion equivalents.
 
 ## Performance Benchmarking
 
