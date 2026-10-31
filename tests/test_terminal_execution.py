@@ -10,6 +10,7 @@ from copilot_fusion.server import create_server
 from pytest import MonkeyPatch
 
 SLEEP_COMMAND = [sys.executable, "-c", "import time; time.sleep(5)"]
+DIGITS_COMMAND = [sys.executable, "-c", "import sys; sys.stdout.write('0123456789')"]
 
 
 def _server(tmp_path: Path, monkeypatch: MonkeyPatch, allowed_commands: list[list[str]]):
@@ -80,11 +81,11 @@ def test_terminal_exec_rejects_invalid_directory(tmp_path: Path, monkeypatch: Mo
 
 def test_terminal_exec_truncates_output(tmp_path: Path, monkeypatch: MonkeyPatch) -> None:
     async def run() -> None:
-        server = _server(tmp_path, monkeypatch, [["printf", "0123456789"]])
+        server = _server(tmp_path, monkeypatch, [DIGITS_COMMAND])
         result = await _call(
             server,
             "terminal_exec",
-            {"command": ["printf", "0123456789"], "max_output_chars": 5},
+            {"command": DIGITS_COMMAND, "max_output_chars": 5, "confirm_unsafe": True},
         )
         assert result["stdout"] == "01234"
         assert result["truncated"] is True
