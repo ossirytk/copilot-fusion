@@ -84,6 +84,18 @@ def test_core_profile_registers_only_memory_and_navigation() -> None:
     assert not names & {"git_status", "fs_glob", "read_file", "diff_staged", "terminal_exec", "apply_text_patch"}
 
 
+def test_core_profile_health_reports_only_available_domains() -> None:
+    async def _read() -> dict:
+        result = await create_server(FusionConfig(profile="core")).call_tool("fusion_health", {})
+        payload = result.structured_content
+        if isinstance(payload, dict) and set(payload) == {"result"}:
+            payload = payload["result"]
+        return payload
+
+    health = asyncio.run(_read())
+    assert health["domains"] == {"core": True, "git": False, "tools": True, "diff": False}
+
+
 def test_profile_env_validation(monkeypatch: MonkeyPatch) -> None:
     monkeypatch.setenv("FUSION_PROFILE", "core")
     assert FusionConfig.from_env().profile == "core"

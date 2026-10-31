@@ -55,7 +55,10 @@ def _conn() -> sqlite3.Connection:
 
 
 def _ensure_fts(conn: sqlite3.Connection) -> None:
-    """Maintain a standalone FTS5 index (keyed by memory id) via triggers; backfill when out of sync."""
+    """Maintain a standalone FTS5 index (keyed by memory id) via triggers."""
+    fts_exists = conn.execute(
+        "SELECT 1 FROM sqlite_master WHERE type = 'table' AND name = 'memories_fts' LIMIT 1"
+    ).fetchone()
     conn.executescript(
         """
         CREATE VIRTUAL TABLE IF NOT EXISTS memories_fts
@@ -72,10 +75,7 @@ def _ensure_fts(conn: sqlite3.Connection) -> None:
         END;
         """
     )
-    total = conn.execute("SELECT COUNT(*) FROM memories").fetchone()[0]
-    indexed = conn.execute("SELECT COUNT(*) FROM memories_fts").fetchone()[0]
-    if total != indexed:
-        conn.execute("DELETE FROM memories_fts")
+    if fts_exists is None:
         conn.execute("INSERT INTO memories_fts (id, content, tags) SELECT id, content, tags FROM memories")
         conn.commit()
 
@@ -88,6 +88,18 @@ def _fts_query(query: str) -> str:
 
 def _iso_now() -> str:
     return datetime.now(UTC).isoformat()
+
+
+def _is_expired(expires_at: str, now: datetime) -> bool:
+    if not expires_at:
+        return False
+    try:
+        expiry = datetime.fromisoformat(expires_at.replace("Z", "+00:00"))
+        if expiry.tzinfo is None:
+            expiry = expiry.replace(tzinfo=UTC)
+        return expiry.astimezone(UTC) < now
+    except (OverflowError, ValueError):
+        return True
 
 
 def _parse_tags(tags: list[str] | None) -> list[str]:
@@ -139,8 +151,8 @@ def recall(
     scope_path: str = "",
 ) -> list[dict[str, object]]:
     conn = _conn()
-    where = ["(m.expires_at = '' OR m.expires_at >= ?)"]
-    params: list[object] = [_iso_now()]
+    where: list[str] = []
+    params: list[object] = []
     for column, value in (("scope", scope), ("scope_path", scope_path), ("type", type)):
         if value:
             where.append(f"m.{column} = ?")
@@ -154,20 +166,33 @@ def recall(
     required_tags = set(_parse_tags(tags))
     q = query.strip()
     match = _fts_query(q)
+    filters = " AND ".join(where) or "1"
     if match:
         # bm25() is lower-is-better (negative); exact phrase containment gets a fixed bonus.
         sql = (
             "SELECT m.*, -bm25(memories_fts, 0.0, 1.0, 0.5) + (CASE WHEN instr(lower(m.content), ?) > 0 "
             "THEN 1.0 ELSE 0.0 END) AS score FROM memories_fts JOIN memories m ON m.id = memories_fts.id "
-            f"WHERE memories_fts MATCH ? AND {' AND '.join(where)} ORDER BY score DESC, m.updated_at DESC"
+            f"WHERE memories_fts MATCH ? AND {filters} ORDER BY score DESC, m.updated_at DESC"
         )
         params = [q.lower(), match, *params]
+    elif q:
+        sql = (
+            "SELECT m.*, 1.0 AS score FROM memories m WHERE instr(lower(m.content), ?) > 0 "
+            f"AND {filters} ORDER BY m.updated_at DESC"
+        )
+        params = [q.lower(), *params]
     else:
-        sql = f"SELECT m.*, 0.0 AS score FROM memories m WHERE {' AND '.join(where)} ORDER BY m.updated_at DESC"
+        sql = (
+            f"SELECT m.*, 0.0 AS score FROM memories m "
+            f"{'WHERE ' + ' AND '.join(where) if where else ''} ORDER BY m.updated_at DESC"
+        )
     rows = conn.execute(sql, params).fetchall()
     conn.close()
     result: list[dict[str, object]] = []
+    now = datetime.now(UTC)
     for row in rows:
+        if _is_expired(row["expires_at"], now):
+            continue
         row_tags = json.loads(row["tags"])
         if required_tags and not (required_tags & set(row_tags)):
             continue

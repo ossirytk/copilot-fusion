@@ -5,6 +5,7 @@ from __future__ import annotations
 import asyncio
 from pathlib import Path
 
+from contextwell_tools import symbols
 from copilot_fusion.server import create_server
 
 
@@ -93,3 +94,44 @@ def test_same_name_hint_and_non_ascii_column(tmp_path: Path) -> None:
     refs = next(r for r in rows if r["path"].endswith("b.py"))["references"]["items"]
     ref = next(r for r in refs if r["path"].endswith("b.py") and r["line"] == 1)
     assert ref["match_type"] == "callsite" and ref["column"] == len('s = "é☃"; x = ') + 1
+
+
+def test_python_default_arguments_are_outside_function_scope(tmp_path: Path) -> None:
+    (tmp_path / "defaults.py").write_text(
+        "def load():\n    pass\n\ndef body():\n    pass\n\ndef run(value=load()):\n    body()\n",
+        encoding="utf-8",
+    )
+    rows = _search([tmp_path], kinds=["function"], include_callgraph=True)
+    run = _by_name(rows, "run")["callgraph"]
+    load = _by_name(rows, "load")["callgraph"]
+    assert [callee["symbol"] for callee in run["callees"]] == ["body"]
+    assert load["callers"] == ["<module>"]
+
+
+def test_typescript_class_fields_are_definitions_and_scopes(tmp_path: Path) -> None:
+    (tmp_path / "client.ts").write_text(
+        "class Client {\n  run = () => this.send();\n  send() {}\n}\n",
+        encoding="utf-8",
+    )
+    rows = _search([tmp_path], kinds=["function"], include_callgraph=True)
+    run = _by_name(rows, "run")
+    send = _by_name(rows, "send")
+    assert run["parent"] == "Client"
+    assert "run" in send["callgraph"]["callers"]
+
+
+def test_definition_only_search_indexes_files_lazily(tmp_path: Path, monkeypatch) -> None:
+    first = tmp_path / "a.py"
+    first.write_text("def target():\n    pass\n", encoding="utf-8")
+    (tmp_path / "b.py").write_text("def another():\n    pass\n", encoding="utf-8")
+    original = symbols.index_file
+    indexed: list[Path] = []
+
+    def track_index(path: Path):
+        indexed.append(path)
+        return original(path)
+
+    monkeypatch.setattr(symbols, "index_file", track_index)
+    rows = _search([tmp_path], query="target", kinds=["function"], max_results=1)
+    assert [row["symbol"] for row in rows] == ["target"]
+    assert indexed == [first]

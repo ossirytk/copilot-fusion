@@ -86,6 +86,7 @@ _VERSIONED_PYTHON_RE = re.compile(r"^python\d+(\.\d+)*$")
 def _executable_name(executable: str) -> str:
     """Normalize an executable for policy checks: basename (either separator), lowercase, no .exe-style suffix."""
     name = re.split(r"[\\/]", executable)[-1].lower()
+    name = re.sub(r"^[a-z]:", "", name)
     for suffix in _WINDOWS_EXECUTABLE_SUFFIXES:
         if name.endswith(suffix):
             name = name[: -len(suffix)]

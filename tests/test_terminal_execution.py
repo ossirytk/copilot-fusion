@@ -242,6 +242,7 @@ def test_terminal_status_does_not_hang_when_readers_never_finish(tmp_path: Path)
         ("git", "git"),
         ("GIT.EXE", "git"),
         ("C:\\Program Files\\Git\\cmd\\git.exe", "git"),
+        ("C:git.exe", "git"),
         ("/usr/bin/python3.12", "python"),
         ("python3", "python"),
         ("powershell.EXE", "powershell"),
@@ -254,7 +255,19 @@ def test_executable_name_normalization(raw: str, expected: str) -> None:
 
 
 def test_windows_style_executable_cannot_bypass_policy(tmp_path: Path) -> None:
-    executor = TerminalExecutor(tmp_path, {("git.exe", "push", "origin"), ("RM.EXE", "x"), ("cmd.exe", "/c", "dir")})
+    executor = TerminalExecutor(
+        tmp_path,
+        {
+            ("git.exe", "push", "origin"),
+            ("C:git.exe", "push", "-d", "origin"),
+            ("RM.EXE", "x"),
+            ("C:rm.exe", "x"),
+            ("cmd.exe", "/c", "dir"),
+        },
+    )
     assert "confirm_unsafe" in str(executor._validate_command(["git.exe", "push", "origin"], False))
     assert "blocked" in str(executor._validate_command(["RM.EXE", "x"], True))
     assert "confirm_unsafe" in str(executor._validate_command(["cmd.exe", "/c", "dir"], False))
+    assert "confirm_unsafe" in str(executor._validate_command(["C:git.exe", "push", "-d", "origin"], False))
+    assert "blocked" in str(executor._validate_command(["C:git.exe", "push", "-d", "origin"], True))
+    assert "blocked" in str(executor._validate_command(["C:rm.exe", "x"], True))

@@ -32,9 +32,9 @@ def create_server(config: FusionConfig | None = None) -> FastMCP:
             "profile": effective_config.profile,
             "domains": {
                 "core": effective_config.enable_core,
-                "git": effective_config.enable_git,
+                "git": effective_config.enable_git and not core_profile,
                 "tools": effective_config.enable_tools,
-                "diff": effective_config.enable_diff,
+                "diff": effective_config.enable_diff and not core_profile,
             },
         }
 

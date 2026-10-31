@@ -13,6 +13,7 @@ from collections import Counter, OrderedDict, defaultdict
 from dataclasses import dataclass, field
 from functools import lru_cache
 from pathlib import Path
+from typing import Iterator
 
 import tree_sitter as ts
 import tree_sitter_go
@@ -64,6 +65,7 @@ class Definition:
     end_line: int
     parent: str
     span: tuple[Position, Position]
+    body_span: tuple[Position, Position] | None = None
 
 
 @dataclass(slots=True)
@@ -102,6 +104,11 @@ class _Lang:
     def scope(self, node: ts.Node, owner: str | None, container: str | None) -> tuple[str | None, str | None]:
         return owner, container
 
+    def child_scope(
+        self, node: ts.Node, child: ts.Node, owner: str | None, container: str | None
+    ) -> tuple[str | None, str | None]:
+        return self.scope(node, owner, container)
+
     def call_target(self, node: ts.Node) -> ts.Node | None:
         """Return (function-expression node) for call-like nodes, else None."""
         return None
@@ -137,6 +144,13 @@ class _Python(_Lang):
         if node.type == "class_definition":
             return owner, _text(node.child_by_field_name("name")) or container
         return owner, container
+
+    def child_scope(self, node, child, owner, container):
+        if node.type == "function_definition":
+            body = node.child_by_field_name("body")
+            if body is None or child.start_byte != body.start_byte or child.end_byte != body.end_byte:
+                return owner, container
+        return self.scope(node, owner, container)
 
     def call_target(self, node):
         return node.child_by_field_name("function") if node.type == "call" else None
@@ -176,8 +190,9 @@ class _JavaScript(_Lang):
             return [(name, "class", "")]
         if t == "method_definition" and name and name.type == "property_identifier":
             return [(name, "function", container or "")]
-        if t == "field_definition":
-            prop, value = node.child_by_field_name("property"), node.child_by_field_name("value")
+        if t in {"field_definition", "public_field_definition"}:
+            prop = node.child_by_field_name("property") or node.child_by_field_name("name")
+            value = node.child_by_field_name("value")
             if prop is not None and value is not None and value.type in _JS_FUNCTION_VALUES:
                 return [(prop, "function", container or "")]
         if t == "variable_declarator" and name is not None and name.type == "identifier":
@@ -191,8 +206,12 @@ class _JavaScript(_Lang):
         t = node.type
         if t in {"function_declaration", "generator_function_declaration", "method_definition"}:
             return _text(node.child_by_field_name("name")) or owner, None
-        if t == "variable_declarator" or t == "field_definition":
-            name = node.child_by_field_name("name" if t == "variable_declarator" else "property")
+        if t in {"variable_declarator", "field_definition", "public_field_definition"}:
+            name = (
+                node.child_by_field_name("name")
+                if t == "variable_declarator"
+                else node.child_by_field_name("property") or node.child_by_field_name("name")
+            )
             value = node.child_by_field_name("value")
             if name is not None and value is not None and value.type in _JS_FUNCTION_VALUES:
                 return _text(name), None
@@ -306,6 +325,7 @@ def _build_index(path: Path, language: str, grammar: str, source: bytes) -> File
             index.identifiers[_text(node)].append((row, col))
         for name_node, kind, parent in spec.definitions(node, owner, container):
             row, col = name_node.start_point
+            body = node.child_by_field_name("body") if grammar == "py" and node.type == "function_definition" else None
             index.definitions.append(
                 Definition(
                     name=_text(name_node),
@@ -315,6 +335,7 @@ def _build_index(path: Path, language: str, grammar: str, source: bytes) -> File
                     end_line=node.end_point[0] + 1,
                     parent=parent,
                     span=(node.start_point, node.end_point),
+                    body_span=(body.start_point, body.end_point) if body is not None else None,
                 )
             )
         target = spec.call_target(node)
@@ -333,8 +354,7 @@ def _build_index(path: Path, language: str, grammar: str, source: bytes) -> File
                 )
                 index.calls.append(call)
                 index.calls_by_name[name].append(call)
-        child_owner, child_container = spec.scope(node, owner, container)
-        stack.extend((child, child_owner, child_container) for child in reversed(node.children))
+        stack.extend((child, *spec.child_scope(node, child, owner, container)) for child in reversed(node.children))
     return index
 
 
@@ -372,21 +392,37 @@ def index_file(path: Path) -> FileIndex | None:
     return index
 
 
-def collect_indexes(paths: list[str]) -> list[FileIndex]:
-    """Index every supported file under the given files/directories (vendored/cache dirs are skipped)."""
-    files: dict[Path, None] = {}
+def iter_indexes(paths: list[str]) -> Iterator[FileIndex]:
+    """Index supported files lazily under the given files/directories."""
+    seen: set[Path] = set()
     for source in paths:
         resolved = resolve_path(source)
         if resolved.is_file():
-            files[resolved] = None
+            candidates = (resolved,)
         elif resolved.is_dir():
-            for root, dirs, names in os.walk(resolved):
-                dirs[:] = sorted(d for d in dirs if d not in _SKIP_DIRS)
-                for name in sorted(names):
-                    if Path(name).suffix.lower() in _SUFFIX_LANGUAGE:
-                        files[Path(root) / name] = None
-    indexes = (index_file(path) for path in files)
-    return [index for index in indexes if index is not None]
+
+            def walk_files(root: Path) -> Iterator[Path]:
+                for directory, dirs, names in os.walk(root):
+                    dirs[:] = sorted(d for d in dirs if d not in _SKIP_DIRS)
+                    for name in sorted(names):
+                        if Path(name).suffix.lower() in _SUFFIX_LANGUAGE:
+                            yield Path(directory) / name
+
+            candidates = walk_files(resolved)
+        else:
+            continue
+        for path in candidates:
+            if path in seen:
+                continue
+            seen.add(path)
+            index = index_file(path)
+            if index is not None:
+                yield index
+
+
+def collect_indexes(paths: list[str]) -> list[FileIndex]:
+    """Index every supported file under the given files/directories (vendored/cache dirs are skipped)."""
+    return list(iter_indexes(paths))
 
 
 def signature_of(index: FileIndex, definition: Definition) -> tuple[str, int]:
@@ -464,7 +500,8 @@ def build_callgraph(
                 else:
                     truncated = True
         for call in declaration.calls:
-            if call.name == name or not _within(definition.span, call.pos):
+            span = definition.body_span or definition.span
+            if call.name == name or not _within(span, call.pos):
                 continue
             callee_counts[call.callee] += 1
             if len(callee_sites) < max_items:

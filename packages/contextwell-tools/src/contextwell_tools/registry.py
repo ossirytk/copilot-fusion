@@ -780,13 +780,18 @@ def symbol_search(
     if invalid_kinds:
         return {"error": f"Invalid kinds: {sorted(invalid_kinds)}. Allowed kinds: {sorted(allowed_kinds)}"}
 
-    indexes = symbols.collect_indexes(paths)
     q = query.lower().strip()
     needs_context = include_references or include_callgraph
-    name_counts = symbols.count_same_name(indexes) if needs_context else None
+    if needs_context:
+        indexes = symbols.collect_indexes(paths)
+        search_indexes = indexes
+        name_counts = symbols.count_same_name(indexes)
+    else:
+        search_indexes = symbols.iter_indexes(paths)
+        name_counts = None
     results: list[dict[str, object]] = []
 
-    for index in indexes:
+    for index in search_indexes:
         for definition in index.definitions:
             if definition.kind not in selected_kinds or (q and q not in definition.name.lower()):
                 continue

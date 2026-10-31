@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import sqlite3
+from datetime import UTC, datetime, timedelta, timezone
 
 import pytest
 from contextwell_core import registry
@@ -65,6 +66,19 @@ def test_recall_ranks_exact_phrase_first(corpus) -> None:
 def test_recall_skips_expired(corpus) -> None:
     registry.remember(content="stale-secret-token-note", expires_at="2000-01-01T00:00:00+00:00")
     assert registry.recall("stale-secret-token-note") == []
+
+
+def test_recall_compares_expiry_instants_with_offsets(corpus) -> None:
+    expired = (datetime.now(UTC) - timedelta(minutes=1)).astimezone(timezone(timedelta(hours=2))).isoformat()
+    registry.remember(content="offset-expiry-entry", expires_at=expired)
+    assert registry.recall("offset-expiry-entry") == []
+
+
+def test_recall_tokenless_query_uses_literal_content(corpus) -> None:
+    punctuation = registry.remember(content="Keep this marker !!!")
+    emoji = registry.remember(content="Keep this marker ☃")
+    assert [row["id"] for row in registry.recall("!!!")] == [punctuation["id"]]
+    assert [row["id"] for row in registry.recall("☃")] == [emoji["id"]]
 
 
 def test_index_tracks_update_and_forget(corpus) -> None:
