@@ -6,15 +6,15 @@ import asyncio
 import json
 import math
 import os
+import re
 import signal
 import subprocess
 import uuid
 from dataclasses import dataclass, field
-from pathlib import Path, PureWindowsPath
+from pathlib import Path
 
 from fastmcp import FastMCP
 
-_WINDOWS_EXECUTABLE_SUFFIXES = (".exe", ".com", ".bat", ".cmd")
 _DEFAULT_OUTPUT_LIMIT = 8_000
 _MAX_OUTPUT_LIMIT = 20_000
 _MAX_TIMEOUT_SECONDS = 300.0
@@ -79,6 +79,21 @@ _CONFIRMATION_GIT_SUBCOMMANDS = {
 }
 
 
+_WINDOWS_EXECUTABLE_SUFFIXES = (".exe", ".com", ".bat", ".cmd")
+_VERSIONED_PYTHON_RE = re.compile(r"^python\d+(\.\d+)*$")
+
+
+def _executable_name(executable: str) -> str:
+    """Normalize an executable for policy checks: basename (either separator), lowercase, no .exe-style suffix."""
+    name = re.split(r"[\\/]", executable)[-1].lower()
+    name = re.sub(r"^[a-z]:", "", name)
+    for suffix in _WINDOWS_EXECUTABLE_SUFFIXES:
+        if name.endswith(suffix):
+            name = name[: -len(suffix)]
+            break
+    return "python" if _VERSIONED_PYTHON_RE.match(name) else name
+
+
 @dataclass(slots=True)
 class _ProcessRecord:
     process_id: str
@@ -127,16 +142,8 @@ class TerminalExecutor:
             allowlist.add(tuple(entry))
         return cls(workspace, allowlist)
 
-    @staticmethod
-    def _executable_name(command: list[str]) -> str:
-        name = PureWindowsPath(command[0]).name.lower()
-        for suffix in _WINDOWS_EXECUTABLE_SUFFIXES:
-            if name.endswith(suffix):
-                return name[: -len(suffix)]
-        return name
-
     def _requires_confirmation(self, command: list[str]) -> bool:
-        executable = self._executable_name(command)
+        executable = _executable_name(command[0])
         if executable in _CONFIRMATION_EXECUTABLES:
             if executable != "git":
                 return True
@@ -158,7 +165,7 @@ class TerminalExecutor:
         if self._requires_confirmation(command) and not confirm_unsafe:
             return "potentially unsafe command requires confirm_unsafe=true"
 
-        executable = self._executable_name(command)
+        executable = _executable_name(command[0])
         if executable in _BLOCKED_EXECUTABLES:
             return f"destructive or privileged executable is blocked: {executable}"
         if executable == "git" and len(command) > 1:

@@ -1,5 +1,6 @@
 import asyncio
 
+import pytest
 from copilot_fusion.server import create_server
 from copilot_fusion_shared import FusionConfig
 from pytest import MonkeyPatch
@@ -29,7 +30,8 @@ def test_unified_server_exposes_core_git_and_tools() -> None:
     assert "terminal_status" in names
     assert "terminal_stop" in names
     assert "fusion_health" in names
-    assert "fusion_api_compat" in names
+    assert "symbol_search" in names
+    assert "fusion_api_compat" not in names
 
 
 def test_config_toggles_disable_domains() -> None:
@@ -73,57 +75,48 @@ def test_invalid_terminal_env_does_not_break_server_startup(monkeypatch: MonkeyP
     assert "terminal_start" not in names
     assert "terminal_status" not in names
     assert "terminal_stop" not in names
-    matrix = _read_compat_matrix()
-    preferred = matrix["preferred_surface"]
-    assert "terminal_exec" not in preferred
-    assert "terminal_start" not in preferred
-    assert "terminal_status" not in preferred
-    assert "terminal_stop" not in preferred
 
 
-def _read_compat_matrix() -> dict[str, object]:
-    async def _read() -> dict[str, object]:
-        server = create_server()
-        result = await server.call_tool("fusion_api_compat", {})
-        return dict(result.structured_content)
-
-    return asyncio.run(_read())
+def test_core_profile_registers_only_memory_and_navigation() -> None:
+    server = create_server(FusionConfig(profile="core"))
+    names = {tool.name for tool in asyncio.run(server.list_tools())}
+    assert {"remember", "recall", "symbol_search", "fusion_health"} <= names
+    assert not names & {"git_status", "fs_glob", "read_file", "diff_staged", "terminal_exec", "apply_text_patch"}
 
 
-def test_api_compat_matrix_reports_known_gaps() -> None:
-    matrix = _read_compat_matrix()
-    domains = matrix["domains"]
-    assert domains["contextwell"]["missing"] == []
-    assert domains["gitpilot"]["missing"] == []
-    assert domains["toolpilot"]["missing"] == []
+def test_core_profile_health_reports_only_available_domains() -> None:
+    async def _read() -> dict:
+        result = await create_server(FusionConfig(profile="core")).call_tool("fusion_health", {})
+        payload = result.structured_content
+        if isinstance(payload, dict) and set(payload) == {"result"}:
+            payload = payload["result"]
+        return payload
+
+    health = asyncio.run(_read())
+    assert health["domains"] == {"core": True, "git": False, "tools": True, "diff": False}
 
 
-def test_api_compat_matrix_preferred_surface() -> None:
-    matrix = _read_compat_matrix()
-    preferred = matrix["preferred_surface"]
-    assert isinstance(preferred, list)
-    # Core preferred tools are present.
-    for tool in (
-        "remember",
-        "recall",
-        "git_status",
-        "fs_glob",
-        "read_file",
-        "diff_staged",
-        "terminal_exec",
-        "terminal_start",
-        "terminal_status",
-        "terminal_stop",
-    ):
-        assert tool in preferred, f"expected {tool!r} in preferred_surface"
+def test_profile_env_validation(monkeypatch: MonkeyPatch) -> None:
+    monkeypatch.setenv("FUSION_PROFILE", "core")
+    assert FusionConfig.from_env().profile == "core"
+    monkeypatch.setenv("FUSION_PROFILE", "bogus")
+    with pytest.raises(ValueError):
+        FusionConfig.from_env()
 
 
-def test_api_compat_matrix_legacy_aliases() -> None:
-    matrix = _read_compat_matrix()
-    legacy = matrix["legacy_aliases"]
-    assert isinstance(legacy, dict)
-    # Legacy aliases that are registered must map to a preferred alternative string.
-    for name, alt in legacy.items():
-        assert isinstance(alt, str) and alt, f"empty alternative for legacy alias {name!r}"
-    # git_diff is present and flagged as legacy.
-    assert "git_diff" in legacy
+def test_removed_tools_stay_removed() -> None:
+    names = set(_tool_names())
+    removed = {
+        "fs_tree",
+        "json_select",
+        "yaml_select",
+        "file_hash",
+        "remember_file",
+        "remember_batch",
+        "apply_text_patch_batch",
+        "diff_files",
+        "fusion_core_health",
+        "fusion_tools_health",
+        "fusion_diff_health",
+    }
+    assert not names & removed

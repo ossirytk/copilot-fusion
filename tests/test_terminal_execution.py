@@ -5,15 +5,12 @@ from pathlib import Path
 from types import SimpleNamespace
 
 import pytest
-from contextwell_tools.execution import TerminalExecutor, _ProcessRecord
+from contextwell_tools.execution import TerminalExecutor, _executable_name, _ProcessRecord
 from copilot_fusion.server import create_server
 from pytest import MonkeyPatch
 
-PY = sys.executable
-PRINT_READY = [PY, "-c", "import sys; sys.stdout.write('ready')"]
-PRINT_DIGITS = [PY, "-c", "import sys; sys.stdout.write('0123456789')"]
-FAIL = [PY, "-c", "raise SystemExit(1)"]
-SLEEP = [PY, "-c", "import time; time.sleep(5)"]
+SLEEP_COMMAND = [sys.executable, "-c", "import time; time.sleep(5)"]
+DIGITS_COMMAND = [sys.executable, "-c", "import sys; sys.stdout.write('0123456789')"]
 
 
 def _server(tmp_path: Path, monkeypatch: MonkeyPatch, allowed_commands: list[list[str]]):
@@ -33,14 +30,13 @@ async def _call(server, tool: str, args: dict[str, object]) -> dict[str, object]
 
 def test_terminal_exec_success_and_failure(tmp_path: Path, monkeypatch: MonkeyPatch) -> None:
     async def run() -> None:
-        server = _server(tmp_path, monkeypatch, [PRINT_READY, FAIL])
-        success = await _call(server, "terminal_exec", {"command": PRINT_READY, "confirm_unsafe": True})
+        server = _server(tmp_path, monkeypatch, [["git", "--version"], ["git", "no-such-subcommand"]])
+        success = await _call(server, "terminal_exec", {"command": ["git", "--version"]})
         assert success["exit_code"] == 0
-        assert success["stdout"] == "ready"
-        assert success["stderr"] == ""
+        assert str(success["stdout"]).startswith("git version")
         assert success["timed_out"] is False
 
-        failure = await _call(server, "terminal_exec", {"command": FAIL, "confirm_unsafe": True})
+        failure = await _call(server, "terminal_exec", {"command": ["git", "no-such-subcommand"]})
         assert failure["exit_code"] != 0
 
     asyncio.run(run())
@@ -57,11 +53,11 @@ def test_terminal_exec_rejects_unapproved_command(tmp_path: Path, monkeypatch: M
 
 def test_terminal_exec_timeout(tmp_path: Path, monkeypatch: MonkeyPatch) -> None:
     async def run() -> None:
-        server = _server(tmp_path, monkeypatch, [SLEEP])
+        server = _server(tmp_path, monkeypatch, [SLEEP_COMMAND])
         result = await _call(
             server,
             "terminal_exec",
-            {"command": SLEEP, "timeout_seconds": 0.05, "confirm_unsafe": True},
+            {"command": SLEEP_COMMAND, "timeout_seconds": 0.05, "confirm_unsafe": True},
         )
         assert result["timed_out"] is True
         assert result["exit_code"] is not None
@@ -85,11 +81,11 @@ def test_terminal_exec_rejects_invalid_directory(tmp_path: Path, monkeypatch: Mo
 
 def test_terminal_exec_truncates_output(tmp_path: Path, monkeypatch: MonkeyPatch) -> None:
     async def run() -> None:
-        server = _server(tmp_path, monkeypatch, [PRINT_DIGITS])
+        server = _server(tmp_path, monkeypatch, [DIGITS_COMMAND])
         result = await _call(
             server,
             "terminal_exec",
-            {"command": PRINT_DIGITS, "max_output_chars": 5, "confirm_unsafe": True},
+            {"command": DIGITS_COMMAND, "max_output_chars": 5, "confirm_unsafe": True},
         )
         assert result["stdout"] == "01234"
         assert result["truncated"] is True
@@ -99,8 +95,8 @@ def test_terminal_exec_truncates_output(tmp_path: Path, monkeypatch: MonkeyPatch
 
 def test_terminal_process_start_status_and_stop(tmp_path: Path, monkeypatch: MonkeyPatch) -> None:
     async def run() -> None:
-        server = _server(tmp_path, monkeypatch, [SLEEP])
-        started = await _call(server, "terminal_start", {"command": SLEEP, "confirm_unsafe": True})
+        server = _server(tmp_path, monkeypatch, [SLEEP_COMMAND])
+        started = await _call(server, "terminal_start", {"command": SLEEP_COMMAND, "confirm_unsafe": True})
         process_id = str(started["process_id"])
 
         running = await _call(server, "terminal_status", {"process_id": process_id})
@@ -238,3 +234,40 @@ def test_terminal_status_does_not_hang_when_readers_never_finish(tmp_path: Path)
         assert result["exit_code"] == 0
 
     asyncio.run(run())
+
+
+@pytest.mark.parametrize(
+    ("raw", "expected"),
+    [
+        ("git", "git"),
+        ("GIT.EXE", "git"),
+        ("C:\\Program Files\\Git\\cmd\\git.exe", "git"),
+        ("C:git.exe", "git"),
+        ("/usr/bin/python3.12", "python"),
+        ("python3", "python"),
+        ("powershell.EXE", "powershell"),
+        ("rm.exe", "rm"),
+        ("pythonista", "pythonista"),
+    ],
+)
+def test_executable_name_normalization(raw: str, expected: str) -> None:
+    assert _executable_name(raw) == expected
+
+
+def test_windows_style_executable_cannot_bypass_policy(tmp_path: Path) -> None:
+    executor = TerminalExecutor(
+        tmp_path,
+        {
+            ("git.exe", "push", "origin"),
+            ("C:git.exe", "push", "-d", "origin"),
+            ("RM.EXE", "x"),
+            ("C:rm.exe", "x"),
+            ("cmd.exe", "/c", "dir"),
+        },
+    )
+    assert "confirm_unsafe" in str(executor._validate_command(["git.exe", "push", "origin"], False))
+    assert "blocked" in str(executor._validate_command(["RM.EXE", "x"], True))
+    assert "confirm_unsafe" in str(executor._validate_command(["cmd.exe", "/c", "dir"], False))
+    assert "confirm_unsafe" in str(executor._validate_command(["C:git.exe", "push", "-d", "origin"], False))
+    assert "blocked" in str(executor._validate_command(["C:git.exe", "push", "-d", "origin"], True))
+    assert "blocked" in str(executor._validate_command(["C:rm.exe", "x"], True))

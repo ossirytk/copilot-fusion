@@ -2,6 +2,8 @@
 
 ## Status
 
+- **Superseded:** `symbol_search` is now Tree-sitter based (Python, JS/TS/JSX/TSX, Go); see `contextwell_tools/symbols.py`. The regex-era notes below are historical.
+
 - Phase 1 lightweight Python symbol lookup is implemented as `symbol_search`.
 - Phase 2 JavaScript/TypeScript/JSX/TSX symbol coverage is implemented in `symbol_search`.
 - Richer symbol metadata and optional reference scanning are implemented in `symbol_search`.

@@ -33,7 +33,7 @@ def _init_colocated_repo(tmp_path: str) -> None:
 def test_detection_functions() -> None:
     """Test detection helpers in isolated environments."""
     with tempfile.TemporaryDirectory() as tmp:
-        path = Path(tmp)
+        path = Path(tmp).resolve()
         # Empty directory: no git, no jj
         assert find_jj_root(path) is None
         assert find_git_root(path) is None
@@ -56,7 +56,7 @@ def test_detection_functions() -> None:
 def test_detection_in_subdirectory() -> None:
     """Test finding roots from subdirectories."""
     with tempfile.TemporaryDirectory() as tmp:
-        path = Path(tmp)
+        path = Path(tmp).resolve()
         (path / ".jj").mkdir()
         sub = path / "a" / "b"
         sub.mkdir(parents=True)
