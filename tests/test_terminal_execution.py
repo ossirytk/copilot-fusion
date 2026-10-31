@@ -1,11 +1,19 @@
 import asyncio
 import json
+import sys
 from pathlib import Path
 from types import SimpleNamespace
 
+import pytest
 from contextwell_tools.execution import TerminalExecutor, _ProcessRecord
 from copilot_fusion.server import create_server
 from pytest import MonkeyPatch
+
+PY = sys.executable
+PRINT_READY = [PY, "-c", "import sys; sys.stdout.write('ready')"]
+PRINT_DIGITS = [PY, "-c", "import sys; sys.stdout.write('0123456789')"]
+FAIL = [PY, "-c", "raise SystemExit(1)"]
+SLEEP = [PY, "-c", "import time; time.sleep(5)"]
 
 
 def _server(tmp_path: Path, monkeypatch: MonkeyPatch, allowed_commands: list[list[str]]):
@@ -25,14 +33,14 @@ async def _call(server, tool: str, args: dict[str, object]) -> dict[str, object]
 
 def test_terminal_exec_success_and_failure(tmp_path: Path, monkeypatch: MonkeyPatch) -> None:
     async def run() -> None:
-        server = _server(tmp_path, monkeypatch, [["printf", "ready"], ["false"]])
-        success = await _call(server, "terminal_exec", {"command": ["printf", "ready"]})
+        server = _server(tmp_path, monkeypatch, [PRINT_READY, FAIL])
+        success = await _call(server, "terminal_exec", {"command": PRINT_READY, "confirm_unsafe": True})
         assert success["exit_code"] == 0
         assert success["stdout"] == "ready"
         assert success["stderr"] == ""
         assert success["timed_out"] is False
 
-        failure = await _call(server, "terminal_exec", {"command": ["false"]})
+        failure = await _call(server, "terminal_exec", {"command": FAIL, "confirm_unsafe": True})
         assert failure["exit_code"] != 0
 
     asyncio.run(run())
@@ -49,11 +57,11 @@ def test_terminal_exec_rejects_unapproved_command(tmp_path: Path, monkeypatch: M
 
 def test_terminal_exec_timeout(tmp_path: Path, monkeypatch: MonkeyPatch) -> None:
     async def run() -> None:
-        server = _server(tmp_path, monkeypatch, [["sleep", "5"]])
+        server = _server(tmp_path, monkeypatch, [SLEEP])
         result = await _call(
             server,
             "terminal_exec",
-            {"command": ["sleep", "5"], "timeout_seconds": 0.05},
+            {"command": SLEEP, "timeout_seconds": 0.05, "confirm_unsafe": True},
         )
         assert result["timed_out"] is True
         assert result["exit_code"] is not None
@@ -77,11 +85,11 @@ def test_terminal_exec_rejects_invalid_directory(tmp_path: Path, monkeypatch: Mo
 
 def test_terminal_exec_truncates_output(tmp_path: Path, monkeypatch: MonkeyPatch) -> None:
     async def run() -> None:
-        server = _server(tmp_path, monkeypatch, [["printf", "0123456789"]])
+        server = _server(tmp_path, monkeypatch, [PRINT_DIGITS])
         result = await _call(
             server,
             "terminal_exec",
-            {"command": ["printf", "0123456789"], "max_output_chars": 5},
+            {"command": PRINT_DIGITS, "max_output_chars": 5, "confirm_unsafe": True},
         )
         assert result["stdout"] == "01234"
         assert result["truncated"] is True
@@ -91,8 +99,8 @@ def test_terminal_exec_truncates_output(tmp_path: Path, monkeypatch: MonkeyPatch
 
 def test_terminal_process_start_status_and_stop(tmp_path: Path, monkeypatch: MonkeyPatch) -> None:
     async def run() -> None:
-        server = _server(tmp_path, monkeypatch, [["sleep", "5"]])
-        started = await _call(server, "terminal_start", {"command": ["sleep", "5"]})
+        server = _server(tmp_path, monkeypatch, [SLEEP])
+        started = await _call(server, "terminal_start", {"command": SLEEP, "confirm_unsafe": True})
         process_id = str(started["process_id"])
 
         running = await _call(server, "terminal_status", {"process_id": process_id})
@@ -191,6 +199,7 @@ def test_terminal_exec_requires_confirmation_for_git_switch(tmp_path: Path, monk
     asyncio.run(run())
 
 
+@pytest.mark.skipif(sys.platform == "win32", reason="chmod is POSIX-only")
 def test_terminal_exec_requires_confirmation_for_chmod(tmp_path: Path, monkeypatch: MonkeyPatch) -> None:
     async def run() -> None:
         target = tmp_path / "sample.txt"

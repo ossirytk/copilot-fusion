@@ -10,10 +10,11 @@ import signal
 import subprocess
 import uuid
 from dataclasses import dataclass, field
-from pathlib import Path
+from pathlib import Path, PureWindowsPath
 
 from fastmcp import FastMCP
 
+_WINDOWS_EXECUTABLE_SUFFIXES = (".exe", ".com", ".bat", ".cmd")
 _DEFAULT_OUTPUT_LIMIT = 8_000
 _MAX_OUTPUT_LIMIT = 20_000
 _MAX_TIMEOUT_SECONDS = 300.0
@@ -126,8 +127,16 @@ class TerminalExecutor:
             allowlist.add(tuple(entry))
         return cls(workspace, allowlist)
 
+    @staticmethod
+    def _executable_name(command: list[str]) -> str:
+        name = PureWindowsPath(command[0]).name.lower()
+        for suffix in _WINDOWS_EXECUTABLE_SUFFIXES:
+            if name.endswith(suffix):
+                return name[: -len(suffix)]
+        return name
+
     def _requires_confirmation(self, command: list[str]) -> bool:
-        executable = Path(command[0]).name.lower()
+        executable = self._executable_name(command)
         if executable in _CONFIRMATION_EXECUTABLES:
             if executable != "git":
                 return True
@@ -149,7 +158,7 @@ class TerminalExecutor:
         if self._requires_confirmation(command) and not confirm_unsafe:
             return "potentially unsafe command requires confirm_unsafe=true"
 
-        executable = Path(command[0]).name.lower()
+        executable = self._executable_name(command)
         if executable in _BLOCKED_EXECUTABLES:
             return f"destructive or privileged executable is blocked: {executable}"
         if executable == "git" and len(command) > 1:
